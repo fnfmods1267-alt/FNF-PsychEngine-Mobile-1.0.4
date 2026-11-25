@@ -49,11 +49,24 @@ class Paths
 			}
 		}
 
+		// also clear non local sounds in the tracked sounds list
+		// (previously only cleared in clearStoredMemory, which ran less often,
+		// letting cached audio pile up on low-RAM devices)
+		for (key in currentTrackedSounds.keys())
+		{
+			if (!localTrackedAssets.contains(key) && !dumpExclusions.contains(key))
+			{
+				Assets.cache.clear(key);
+				currentTrackedSounds.remove(key);
+			}
+		}
+
 		// run the garbage collector for good measure lmfao
+		// NOTE: left as a plain System.gc() here (no forced NativeGc.run(true)) because
+		// this function now also sweeps sounds and may run more often than clearStoredMemory();
+		// a full forced GC on every call can cause its own hitches on Android. clearStoredMemory()
+		// below still does the heavier forced collect for the harder, less frequent reset.
 		System.gc();
-		#if cpp
-		cpp.NativeGc.run(true);
-		#end
 	}
 
 	// define the locally tracked assets
@@ -81,6 +94,13 @@ class Paths
 		// flags everything to be cleared out next unused memory clear
 		localTrackedAssets = [];
 		#if !html5 openfl.Assets.cache.clear("songs"); #end
+
+		// force the memory we just freed above to actually be reclaimed now,
+		// instead of waiting for the next clearUnusedMemory() call
+		System.gc();
+		#if cpp
+		cpp.NativeGc.run(true);
+		#end
 	}
 
 	public static function freeGraphicsFromMemory()
@@ -382,7 +402,6 @@ class Paths
 
 	inline static public function getSparrowAtlas(key:String, ?parentFolder:String = null, ?allowGPU:Bool = true):FlxAtlasFrames
 	{
-		if(key.contains('psychic')) trace(key, parentFolder, allowGPU);
 		var imageLoaded:FlxGraphic = image(key, parentFolder, allowGPU);
 		#if MODS_ALLOWED
 		var xmlExists:Bool = false;

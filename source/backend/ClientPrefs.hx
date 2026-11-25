@@ -284,8 +284,14 @@ class ClientPrefs {
 
 	inline public static function getGameplaySetting(name:String, defaultValue:Dynamic = null, ?customDefaultValue:Bool = false):Dynamic
 	{
-		if(!customDefaultValue) defaultValue = defaultData.gameplaySettings.get(name);
-		return /*PlayState.isStoryMode ? defaultValue : */ (data.gameplaySettings.exists(name) ? data.gameplaySettings.get(name) : defaultValue);
+		// Only looks up defaultData when it's actually going to be used (data has no
+		// override for `name`, or the caller passed a custom default), instead of
+		// always paying for defaultData's Map lookup up front and throwing it away
+		// in the common case where `data` already has the setting. These are called
+		// per note-hit/song-speed-check paths, so trimming a Map lookup per call adds up.
+		if (data.gameplaySettings.exists(name))
+			return data.gameplaySettings.get(name);
+		return customDefaultValue ? defaultValue : defaultData.gameplaySettings.get(name);
 	}
 
 	public static function reloadVolumeKeys()
