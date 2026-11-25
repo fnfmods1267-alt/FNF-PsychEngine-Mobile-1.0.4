@@ -335,17 +335,52 @@ class LoadingState extends MusicBeatState
 		mutex = null;
 	}
 
+	// How many decoded bitmaps get uploaded to the GPU (FlxGraphic.fromBitmapData,
+	// texture creation, lock/getSurface/dispose in Paths.cacheBitmap) per call to
+	// checkLoaded(). checkLoaded() runs every single frame from update() (see below),
+	// so whenever several images finished decoding on background threads in the same
+	// frame, ALL of them used to get uploaded to the GPU in that one frame - this is
+	// main-thread/GPU work, not something the thread pool helps with, so it's exactly
+	// the kind of freeze/hitch this whole pass is trying to get rid of. Spreading the
+	// upload across frames trades a single big stall for several much smaller ones,
+	// which is the right trade on mobile. Raise this if loads feel too slow instead.
+	static inline var MAX_UPLOADS_PER_FRAME:Int = 2;
+
 	public static function checkLoaded():Bool
 	{
+		var uploadedThisCall:Int = 0;
 		for (key => bitmap in requestedBitmaps)
 		{
+			if (uploadedThisCall >= MAX_UPLOADS_PER_FRAME) break;
+
 			if (bitmap != null && Paths.cacheBitmap(originalBitmapKeys.get(key), bitmap) != null) {} //trace('finished preloading image $key');
 			else trace('failed to cache image $key');
+
+			// Only remove what we actually processed this call - anything left stays
+			// in the map and gets picked up on the next checkLoaded() instead of being
+			// silently dropped (the old clear() wiped everything regardless of whether
+			// it had been uploaded, which this budget would otherwise have broken).
+			requestedBitmaps.remove(key);
+			originalBitmapKeys.remove(key);
+			uploadedThisCall++;
 		}
-		requestedBitmaps.clear();
-		originalBitmapKeys.clear();
+
+		// Still fully drained by the non-intrusive, blocking path (getNextState's
+		// while(true) loop below), which doesn't animate a bar and wants everything
+		// available on the very next checkLoaded() call rather than trickled in.
+		if (!isIntrusive)
+		{
+			for (key => bitmap in requestedBitmaps)
+			{
+				if (bitmap != null && Paths.cacheBitmap(originalBitmapKeys.get(key), bitmap) != null) {}
+				else trace('failed to cache image $key');
+			}
+			requestedBitmaps.clear();
+			originalBitmapKeys.clear();
+		}
+
 		// trace('we checked if loaded');
-		return (loaded >= loadMax && initialThreadCompleted);
+		return (loaded >= loadMax && initialThreadCompleted && requestedBitmaps.keys().hasNext() == false);
 	}
 
 	public static function loadNextDirectory()
