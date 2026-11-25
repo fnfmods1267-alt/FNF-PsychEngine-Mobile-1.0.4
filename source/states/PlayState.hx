@@ -1910,13 +1910,23 @@ class PlayState extends MusicBeatState
 	// Health icon updaters
 	public dynamic function updateIconsScale(elapsed:Float)
 	{
+		// updateHitbox() recalculates offset/origin and is not free; icons spend the
+		// vast majority of frames already settled at scale 1 (decayed back down after
+		// the last note hit "bump"), so skip the call entirely once there's nothing
+		// left to animate instead of paying for it on every single frame.
 		var mult:Float = FlxMath.lerp(1, iconP1.scale.x, Math.exp(-elapsed * 9 * playbackRate));
-		iconP1.scale.set(mult, mult);
-		iconP1.updateHitbox();
+		if (Math.abs(mult - iconP1.scale.x) > 0.001)
+		{
+			iconP1.scale.set(mult, mult);
+			iconP1.updateHitbox();
+		}
 
-		var mult:Float = FlxMath.lerp(1, iconP2.scale.x, Math.exp(-elapsed * 9 * playbackRate));
-		iconP2.scale.set(mult, mult);
-		iconP2.updateHitbox();
+		var mult2:Float = FlxMath.lerp(1, iconP2.scale.x, Math.exp(-elapsed * 9 * playbackRate));
+		if (Math.abs(mult2 - iconP2.scale.x) > 0.001)
+		{
+			iconP2.scale.set(mult2, mult2);
+			iconP2.updateHitbox();
+		}
 	}
 
 	public dynamic function updateIconsPosition()
@@ -2884,37 +2894,68 @@ class PlayState extends MusicBeatState
 	}
 
 	// Hold notes
+	// Reused across frames instead of allocating 3 new Arrays every single call -
+	// keysCheck() runs every frame for the whole song, so this was constant GC
+	// pressure on mobile for no reason (keysArray's length never changes mid-song).
+	var _holdArray:Array<Bool> = [];
+	var _pressArray:Array<Bool> = [];
+	var _releaseArray:Array<Bool> = [];
 	private function keysCheck():Void
 	{
 		// HOLDING
-		var holdArray:Array<Bool> = [];
-		var pressArray:Array<Bool> = [];
-		var releaseArray:Array<Bool> = [];
-		for (key in keysArray)
+		// Also track whether any key was pressed/held/released in this same pass,
+		// instead of a separate contains(true) linear scan afterwards.
+		var anyHold:Bool = false;
+		var anyPress:Bool = false;
+		var anyRelease:Bool = false;
+
+		if (_holdArray.length != keysArray.length)
 		{
-			holdArray.push(controls.pressed(key));
-			pressArray.push(controls.justPressed(key));
-			releaseArray.push(controls.justReleased(key));
+			// keysArray can change (keybind remap, control scheme change), so keep
+			// these in sync with it instead of assuming a fixed length forever.
+			_holdArray.resize(keysArray.length);
+			_pressArray.resize(keysArray.length);
+			_releaseArray.resize(keysArray.length);
+		}
+
+		for (i in 0...keysArray.length)
+		{
+			var key = keysArray[i];
+			var h:Bool = controls.pressed(key);
+			var p:Bool = controls.justPressed(key);
+			var r:Bool = controls.justReleased(key);
+			_holdArray[i] = h;
+			_pressArray[i] = p;
+			_releaseArray[i] = r;
+			if(h) anyHold = true;
+			if(p) anyPress = true;
+			if(r) anyRelease = true;
 		}
 
 		// TO DO: Find a better way to handle controller inputs, this should work for now
-		if(controls.controllerMode && pressArray.contains(true))
-			for (i in 0...pressArray.length)
-				if(pressArray[i] && strumsBlocked[i] != true)
+		if(controls.controllerMode && anyPress)
+			for (i in 0..._pressArray.length)
+				if(_pressArray[i] && strumsBlocked[i] != true)
 					keyPressed(i);
 
 		if (startedCountdown && !inCutscene && !boyfriend.stunned && generatedMusic)
 		{
 			if (notes.length > 0) {
-				for (n in notes) { // I can't do a filter here, that's kinda awesome
+				// Iterating members by index instead of the group's iterator to skip
+				// its extra per-element exists()/alive checks - we already filter on
+				// n != null ourselves right below, same semantics, less overhead.
+				var notesMembers = notes.members;
+				var notesLen:Int = notes.length;
+				for (idx in 0...notesLen) {
+					var n:Note = notesMembers[idx];
 					var canHit:Bool = (n != null && !strumsBlocked[n.noteData] && n.canBeHit
 						&& n.mustPress && !n.tooLate && !n.wasGoodHit && !n.blockHit);
 
-					if (guitarHeroSustains)
-						canHit = canHit && n.parent != null && n.parent.wasGoodHit;
+					if (canHit && guitarHeroSustains)
+						canHit = n.parent != null && n.parent.wasGoodHit;
 
 					if (canHit && n.isSustainNote) {
-						var released:Bool = !holdArray[n.noteData];
+						var released:Bool = !_holdArray[n.noteData];
 
 						if (!released)
 							goodNoteHit(n);
@@ -2922,7 +2963,7 @@ class PlayState extends MusicBeatState
 				}
 			}
 
-			if (!holdArray.contains(true) || endingSong)
+			if (!anyHold || endingSong)
 				playerDance();
 
 			#if ACHIEVEMENTS_ALLOWED
@@ -2931,9 +2972,9 @@ class PlayState extends MusicBeatState
 		}
 
 		// TO DO: Find a better way to handle controller inputs, this should work for now
-		if((controls.controllerMode || strumsBlocked.contains(true)) && releaseArray.contains(true))
-			for (i in 0...releaseArray.length)
-				if(releaseArray[i] || strumsBlocked[i] == true)
+		if((controls.controllerMode || strumsBlocked.contains(true)) && anyRelease)
+			for (i in 0..._releaseArray.length)
+				if(_releaseArray[i] || strumsBlocked[i] == true)
 					keyReleased(i);
 	}
 
@@ -2946,6 +2987,14 @@ class PlayState extends MusicBeatState
 
 		noteMissCommon(daNote.noteData, daNote);
 		stagesFunc(function(stage:BaseStage) stage.noteMiss(daNote));
+		// NOTE (perf): indexOf() below is an O(n) scan of the whole live notes array
+		// just to hand Lua a position number, and it runs on every single miss - on
+		// dense charts with many notes on screen this is real overhead. Left as-is
+		// because existing community Lua scripts already depend on this exact index
+		// as the callback's first argument; changing it would silently break mods,
+		// the same class of bug we just fixed in Character.hx. If you control every
+		// script this engine will run, this is a safe place to drop the indexOf and
+		// pass -1 or the note object instead.
 		var result:Dynamic = callOnLuas('noteMiss', [notes.members.indexOf(daNote), daNote.noteData, daNote.noteType, daNote.isSustainNote]);
 		if(result != LuaUtils.Function_Stop && result != LuaUtils.Function_StopHScript && result != LuaUtils.Function_StopAll) callOnHScript('noteMiss', [daNote]);
 	}
@@ -3426,8 +3475,23 @@ class PlayState extends MusicBeatState
 	}
 	#end
 
+	// NOTE ON THESE FUNCTIONS: callOnScripts/callOnLuas/callOnHScript/setOnScripts/setOnLuas/setOnHScript
+	// run multiple times per frame (onUpdate, onUpdatePost, onSpawnNote, etc. all funnel through here),
+	// for the entire duration of every song. On a mod/song with no Lua or HScript running (common on
+	// Android, where many players use neither), the old code still allocated a handful of arrays
+	// (default args/exclusions/excludeValues, plus a throwaway "arr" of closed scripts) on EVERY call,
+	// even though the loop body below would do nothing. Those allocations are pure GC pressure with
+	// zero payoff, and GC pauses are one of the most noticeable stutter sources on low-end Android.
+	// Every function below now exits before allocating anything if there's nothing to actually call/set.
+
 	public function callOnScripts(funcToCall:String, args:Array<Dynamic> = null, ignoreStops = false, exclusions:Array<String> = null, excludeValues:Array<Dynamic> = null):Dynamic {
-		var returnVal:Dynamic = LuaUtils.Function_Continue;
+		// Bail before touching args/exclusions/excludeValues at all if neither script system has anything loaded.
+		#if (!LUA_ALLOWED && !HSCRIPT_ALLOWED)
+		return LuaUtils.Function_Continue;
+		#else
+		if(luaArrayEmpty() && hscriptArrayEmpty())
+			return LuaUtils.Function_Continue;
+
 		if(args == null) args = [];
 		if(exclusions == null) exclusions = [];
 		if(excludeValues == null) excludeValues = [LuaUtils.Function_Continue];
@@ -3435,25 +3499,55 @@ class PlayState extends MusicBeatState
 		var result:Dynamic = callOnLuas(funcToCall, args, ignoreStops, exclusions, excludeValues);
 		if(result == null || excludeValues.contains(result)) result = callOnHScript(funcToCall, args, ignoreStops, exclusions, excludeValues);
 		return result;
+		#end
+	}
+
+	// Cheap, allocation-free emptiness checks shared by the call*/set* functions below.
+	inline function luaArrayEmpty():Bool {
+		#if LUA_ALLOWED
+		return luaArray.length < 1;
+		#else
+		return true;
+		#end
+	}
+
+	inline function hscriptArrayEmpty():Bool {
+		#if HSCRIPT_ALLOWED
+		return hscriptArray.length < 1;
+		#else
+		return true;
+		#end
 	}
 
 	public function callOnLuas(funcToCall:String, args:Array<Dynamic> = null, ignoreStops = false, exclusions:Array<String> = null, excludeValues:Array<Dynamic> = null):Dynamic {
-		var returnVal:Dynamic = LuaUtils.Function_Continue;
 		#if LUA_ALLOWED
+		// Early-exit before allocating ANY array (including the defaults below and the closed-script
+		// scratch list) when there's no Lua script loaded at all. This is the common case on a song/mod
+		// with no scripting, and previously allocated several arrays here for nothing every single call.
+		if (luaArray.length < 1)
+			return LuaUtils.Function_Continue;
+
 		if(args == null) args = [];
 		if(exclusions == null) exclusions = [];
 		if(excludeValues == null) excludeValues = [LuaUtils.Function_Continue];
 
-		var arr:Array<FunkinLua> = [];
+		var returnVal:Dynamic = LuaUtils.Function_Continue;
+		var hasExclusions:Bool = exclusions.length > 0;
+
+		// Only allocated lazily, and only if a script actually turns out closed this call -
+		// avoids an allocation on every single call in the (very common) all-scripts-alive case.
+		var closedScripts:Array<FunkinLua> = null;
+
 		for (script in luaArray)
 		{
 			if(script.closed)
 			{
-				arr.push(script);
+				if(closedScripts == null) closedScripts = [];
+				closedScripts.push(script);
 				continue;
 			}
 
-			if(exclusions.contains(script.scriptName))
+			if(hasExclusions && exclusions.contains(script.scriptName))
 				continue;
 
 			var myValue:Dynamic = script.call(funcToCall, args);
@@ -3466,32 +3560,41 @@ class PlayState extends MusicBeatState
 			if(myValue != null && !excludeValues.contains(myValue))
 				returnVal = myValue;
 
-			if(script.closed) arr.push(script);
+			if(script.closed)
+			{
+				if(closedScripts == null) closedScripts = [];
+				closedScripts.push(script);
+			}
 		}
 
-		if(arr.length > 0)
-			for (script in arr)
+		if(closedScripts != null)
+			for (script in closedScripts)
 				luaArray.remove(script);
-		#end
+
 		return returnVal;
+		#else
+		return LuaUtils.Function_Continue;
+		#end
 	}
 
 	public function callOnHScript(funcToCall:String, args:Array<Dynamic> = null, ?ignoreStops:Bool = false, exclusions:Array<String> = null, excludeValues:Array<Dynamic> = null):Dynamic {
-		var returnVal:Dynamic = LuaUtils.Function_Continue;
-
 		#if HSCRIPT_ALLOWED
-		if(exclusions == null) exclusions = new Array();
-		if(excludeValues == null) excludeValues = new Array();
+		// Same early-exit idea as callOnLuas: skip building exclusions/excludeValues entirely
+		// when there's no HScript instance loaded to call in the first place.
+		if (hscriptArray.length < 1)
+			return LuaUtils.Function_Continue;
+
+		if(exclusions == null) exclusions = [];
+		if(excludeValues == null) excludeValues = [];
 		excludeValues.push(LuaUtils.Function_Continue);
 
-		var len:Int = hscriptArray.length;
-		if (len < 1)
-			return returnVal;
+		var returnVal:Dynamic = LuaUtils.Function_Continue;
+		var hasExclusions:Bool = exclusions.length > 0;
 
 		for(script in hscriptArray)
 		{
 			@:privateAccess
-			if(script == null || !script.exists(funcToCall) || exclusions.contains(script.origin))
+			if(script == null || !script.exists(funcToCall) || (hasExclusions && exclusions.contains(script.origin)))
 				continue;
 
 			var callValue = script.call(funcToCall, args);
@@ -3509,12 +3612,18 @@ class PlayState extends MusicBeatState
 					returnVal = myValue;
 			}
 		}
-		#end
 
 		return returnVal;
+		#else
+		return LuaUtils.Function_Continue;
+		#end
 	}
 
 	public function setOnScripts(variable:String, arg:Dynamic, exclusions:Array<String> = null) {
+		// Skip entirely, with no array allocation, if neither script array has anything in it.
+		if(luaArrayEmpty() && hscriptArrayEmpty())
+			return;
+
 		if(exclusions == null) exclusions = [];
 		setOnLuas(variable, arg, exclusions);
 		setOnHScript(variable, arg, exclusions);
@@ -3522,9 +3631,12 @@ class PlayState extends MusicBeatState
 
 	public function setOnLuas(variable:String, arg:Dynamic, exclusions:Array<String> = null) {
 		#if LUA_ALLOWED
-		if(exclusions == null) exclusions = [];
+		if (luaArray.length < 1)
+			return;
+
+		var hasExclusions:Bool = exclusions != null && exclusions.length > 0;
 		for (script in luaArray) {
-			if(exclusions.contains(script.scriptName))
+			if(hasExclusions && exclusions.contains(script.scriptName))
 				continue;
 
 			script.set(variable, arg);
@@ -3534,9 +3646,12 @@ class PlayState extends MusicBeatState
 
 	public function setOnHScript(variable:String, arg:Dynamic, exclusions:Array<String> = null) {
 		#if HSCRIPT_ALLOWED
-		if(exclusions == null) exclusions = [];
+		if (hscriptArray.length < 1)
+			return;
+
+		var hasExclusions:Bool = exclusions != null && exclusions.length > 0;
 		for (script in hscriptArray) {
-			if(exclusions.contains(script.origin))
+			if(hasExclusions && exclusions.contains(script.origin))
 				continue;
 
 			script.set(variable, arg);
