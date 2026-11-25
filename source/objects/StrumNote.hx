@@ -160,6 +160,11 @@ class StrumNote extends FlxSprite
 	}
 
 	public function playAnim(anim:String, ?force:Bool = false) {
+		// Skip the whole call when we're already playing this exact animation and aren't forcing a restart:
+		// centerOffsets/centerOrigin do real math and don't need to repeat for a no-op play() call.
+		if (!force && animation.curAnim != null && animation.curAnim.name == anim)
+			return;
+
 		animation.play(anim, force);
 		if(animation.curAnim != null)
 		{

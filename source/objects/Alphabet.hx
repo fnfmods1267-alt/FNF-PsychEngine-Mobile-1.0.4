@@ -162,15 +162,28 @@ class Alphabet extends FlxSpriteGroup
 		}
 	}
 
+	// Below this, the lerp has visually converged - menus commonly hold many Alphabet
+	// instances (freeplay/story lists) sitting still for most of their lifetime, and
+	// each was still paying for FlxMath.lerp + Math.exp (twice) every single frame
+	// with no visible movement left to show for it.
+	static inline var SNAP_EPSILON:Float = 0.05;
 	override function update(elapsed:Float)
 	{
 		if (isMenuItem)
 		{
-			var lerpVal:Float = Math.exp(-elapsed * 9.6);
-			if(changeX)
-				x = FlxMath.lerp((targetY * distancePerItem.x) + startPosition.x, x, lerpVal);
-			if(changeY)
-				y = FlxMath.lerp((targetY * 1.3 * distancePerItem.y) + startPosition.y, y, lerpVal);
+			var targetX:Float = (targetY * distancePerItem.x) + startPosition.x;
+			var targetYPos:Float = (targetY * 1.3 * distancePerItem.y) + startPosition.y;
+
+			if(changeX && Math.abs(targetX - x) > SNAP_EPSILON)
+			{
+				var lerpVal:Float = Math.exp(-elapsed * 9.6);
+				x = FlxMath.lerp(targetX, x, lerpVal);
+			}
+			if(changeY && Math.abs(targetYPos - y) > SNAP_EPSILON)
+			{
+				var lerpVal:Float = Math.exp(-elapsed * 9.6);
+				y = FlxMath.lerp(targetYPos, y, lerpVal);
+			}
 		}
 		super.update(elapsed);
 	}
@@ -385,13 +398,19 @@ class AlphaCharacter extends FlxSprite
 			if(curLetter != null && curLetter.anim != null) alphaAnim = curLetter.anim;
 
 			var anim:String = alphaAnim + postfix;
-			animation.addByPrefix(anim, anim, 24);
+			// This sprite is drawn from a recycle() pool (see createLetters()), so the
+			// same AlphaCharacter instance gets reused across many different texts over
+			// a session. addByPrefix() always added the animation again with no check,
+			// silently piling up duplicate entries under the same name in the animation
+			// controller over time - wasted memory and a slower name lookup as the menu
+			// text keeps changing. `exists()` first keeps this a no-op on repeat letters.
+			if (!animation.exists(anim)) animation.addByPrefix(anim, anim, 24);
 			animation.play(anim, true);
 			if(animation.curAnim == null)
 			{
 				if(postfix != ' bold') postfix = ' normal';
 				anim = 'question' + postfix;
-				animation.addByPrefix(anim, anim, 24);
+				if (!animation.exists(anim)) animation.addByPrefix(anim, anim, 24);
 				animation.play(anim, true);
 			}
 		}
@@ -430,7 +449,7 @@ class AlphaCharacter extends FlxSprite
 		
 		if (lastAnim != null)
 		{
-			animation.addByPrefix(lastAnim, lastAnim, 24);
+			if (!animation.exists(lastAnim)) animation.addByPrefix(lastAnim, lastAnim, 24);
 			animation.play(lastAnim, true);
 			
 			updateHitbox();

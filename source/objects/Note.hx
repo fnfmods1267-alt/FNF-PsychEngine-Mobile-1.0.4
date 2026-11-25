@@ -49,7 +49,12 @@ class Note extends FlxSprite
 		'No Animation'
 	];
 
-	public var extraData:Map<String, Dynamic> = new Map<String, Dynamic>();
+	public var extraData(get, null):Map<String, Dynamic> = null;
+	inline function get_extraData():Map<String, Dynamic>
+	{
+		if (extraData == null) extraData = new Map<String, Dynamic>();
+		return extraData;
+	}
 
 	public var strumTime:Float = 0;
 	public var noteData:Int = 0;
@@ -98,17 +103,25 @@ class Note extends FlxSprite
 	public static var colArray:Array<String> = ['purple', 'blue', 'green', 'red'];
 	public static var defaultNoteSkin(default, never):String = 'noteSkins/NOTE_assets';
 
-	public var noteSplashData:NoteSplashData = {
-		disabled: false,
-		texture: null,
-		antialiasing: !PlayState.isPixelStage,
-		useGlobalShader: false,
-		useRGBShader: (PlayState.SONG != null) ? !(PlayState.SONG.disableNoteRGB == true) : true,
-		r: -1,
-		g: -1,
-		b: -1,
-		a: ClientPrefs.data.splashAlpha
-	};
+	public var noteSplashData(get, null):NoteSplashData = null;
+	inline function get_noteSplashData():NoteSplashData
+	{
+		if (noteSplashData == null)
+		{
+			noteSplashData = {
+				disabled: false,
+				texture: null,
+				antialiasing: !PlayState.isPixelStage,
+				useGlobalShader: false,
+				useRGBShader: (PlayState.SONG != null) ? !(PlayState.SONG.disableNoteRGB == true) : true,
+				r: -1,
+				g: -1,
+				b: -1,
+				a: ClientPrefs.data.splashAlpha
+			};
+		}
+		return noteSplashData;
+	}
 
 	public var offsetX:Float = 0;
 	public var offsetY:Float = 0;
@@ -544,30 +557,51 @@ class Note extends FlxSprite
 		if((mustPress || !ignoreNote) && (wasGoodHit || (prevNote.wasGoodHit && !canBeHit)))
 		{
 			var swagRect:FlxRect = clipRect;
-			if(swagRect == null) swagRect = new FlxRect(0, 0, frameWidth, frameHeight);
+			var isNewRect:Bool = (swagRect == null);
+			if(isNewRect) swagRect = new FlxRect(0, 0, frameWidth, frameHeight);
 
+			var changed:Bool = isNewRect;
 			if (myStrum.downScroll)
 			{
 				if(y - offset.y * scale.y + height >= center)
 				{
-					swagRect.width = frameWidth;
-					swagRect.height = (center - y) / scale.y;
-					swagRect.y = frameHeight - swagRect.height;
+					var newHeight:Float = (center - y) / scale.y;
+					var newY:Float = frameHeight - newHeight;
+					if (isNewRect || swagRect.width != frameWidth || swagRect.height != newHeight || swagRect.y != newY)
+					{
+						swagRect.width = frameWidth;
+						swagRect.height = newHeight;
+						swagRect.y = newY;
+						changed = true;
+					}
 				}
 			}
 			else if (y + offset.y * scale.y <= center)
 			{
-				swagRect.y = (center - y) / scale.y;
-				swagRect.width = width / scale.x;
-				swagRect.height = (height / scale.y) - swagRect.y;
+				var newY:Float = (center - y) / scale.y;
+				var newWidth:Float = width / scale.x;
+				var newHeight:Float = (height / scale.y) - newY;
+				if (isNewRect || swagRect.y != newY || swagRect.width != newWidth || swagRect.height != newHeight)
+				{
+					swagRect.y = newY;
+					swagRect.width = newWidth;
+					swagRect.height = newHeight;
+					changed = true;
+				}
 			}
-			clipRect = swagRect;
+
+			// Only trigger the (costly) clipRect setter when something actually changed
+			if (changed) clipRect = swagRect;
 		}
 	}
 
 	@:noCompletion
 	override function set_clipRect(rect:FlxRect):FlxRect
 	{
+		// clipToStrumNote() already mutates this same rect object in place and only
+		// calls this setter when the resulting values actually changed (see its own
+		// `changed` guard), so there's no meaningful before/after state left to compare
+		// here - rect and clipRect are the same reference by the time we get this far.
 		clipRect = rect;
 
 		if (frames != null)

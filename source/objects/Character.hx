@@ -47,7 +47,12 @@ class Character extends FlxSprite
 
 	public var animOffsets:Map<String, Array<Dynamic>>;
 	public var debugMode:Bool = false;
-	public var extraData:Map<String, Dynamic> = new Map<String, Dynamic>();
+	public var extraData(get, null):Map<String, Dynamic> = null;
+	inline function get_extraData():Map<String, Dynamic>
+	{
+		if (extraData == null) extraData = new Map<String, Dynamic>();
+		return extraData;
+	}
 
 	public var isPlayer:Bool = false;
 	public var curCharacter:String = DEFAULT_CHARACTER;
@@ -266,10 +271,15 @@ class Character extends FlxSprite
 			specialAnim = false;
 			dance();
 		}
-		else if (getAnimationName().endsWith('miss') && isAnimationFinished())
+		else
 		{
-			dance();
-			finishAnimation();
+			// cached once: avoids a second getAnimationName() + endsWith() call right after
+			var curAnimName:String = getAnimationName();
+			if (curAnimName.endsWith('miss') && isAnimationFinished())
+			{
+				dance();
+				finishAnimation();
+			}
 		}
 
 		switch(curCharacter)
@@ -287,6 +297,8 @@ class Character extends FlxSprite
 				if(isAnimationFinished()) playAnim(getAnimationName(), false, false, animation.curAnim.frames.length - 3);
 		}
 
+		// Read once here: playAnim() above (pico-speaker branch) may have changed the current animation,
+		// so this must be read fresh, but only once instead of the previous duplicate call.
 		if (getAnimationName().startsWith('sing')) holdTimer += elapsed;
 		else if(isPlayer) holdTimer = 0;
 
@@ -308,10 +320,14 @@ class Character extends FlxSprite
 		return !isAnimateAtlas ? (animation.curAnim == null) : (atlas.anim.curInstance == null || atlas.anim.curSymbol == null);
 	}
 
-	var _lastPlayedAnimation:String;
+	// Reads straight from the animation engine instead of a manually tracked variable:
+	// anything that changes the animation outside playAnim() (Lua/HScript calling
+	// character.animation.play() directly is common in mods) would otherwise desync
+	// a cached name from the real current animation.
 	inline public function getAnimationName():String
 	{
-		return _lastPlayedAnimation;
+		if(isAnimationNull()) return '';
+		return !isAnimateAtlas ? animation.curAnim.name : atlas.anim.curSymbol.name;
 	}
 
 	public function isAnimationFinished():Bool
@@ -387,7 +403,6 @@ class Character extends FlxSprite
 			atlas.anim.play(AnimName, Force, Reversed, Frame);
 			atlas.update(0);
 		}
-		_lastPlayedAnimation = AnimName;
 
 		if (hasAnimation(AnimName))
 		{

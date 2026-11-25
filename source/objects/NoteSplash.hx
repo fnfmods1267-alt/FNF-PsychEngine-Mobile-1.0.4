@@ -201,6 +201,8 @@ class NoteSplash extends FlxSprite
 			if (note != null && note.noteSplashData.texture != null) loadedTexture = note.noteSplashData.texture;
 			else if (PlayState.SONG != null && PlayState.SONG.splashSkin != null && PlayState.SONG.splashSkin.length > 0) loadedTexture = PlayState.SONG.splashSkin;
 
+			// loadSplash() rebuilds the whole animation config (addByPrefix/addByIndices for every anim),
+			// so only pay that cost when the texture actually differs from what's loaded.
 			if (texture != loadedTexture) loadSplash(loadedTexture);
 		}
 
@@ -489,13 +491,16 @@ class PixelSplashShader extends FlxShader
 		uniform vec2 uBlocksize;
 
 		vec4 flixel_texture2DCustom(sampler2D bitmap, vec2 coord) {
-			vec2 blocks = openfl_TextureSize / uBlocksize;
-			vec4 color = flixel_texture2D(bitmap, floor(coord * blocks) / blocks);
-			if (!hasTransform) {
-				return color;
+			// Skip the pixelation blocks math entirely when uBlocksize is 1 (no pixel effect active).
+			vec4 color;
+			if (uBlocksize.x <= 1.0 && uBlocksize.y <= 1.0) {
+				color = flixel_texture2D(bitmap, coord);
+			} else {
+				vec2 blocks = openfl_TextureSize / uBlocksize;
+				color = flixel_texture2D(bitmap, floor(coord * blocks) / blocks);
 			}
 
-			if (color.a == 0.0 || mult == 0.0) {
+			if (!hasTransform || color.a == 0.0 || mult == 0.0) {
 				return color * openfl_Alphav;
 			}
 

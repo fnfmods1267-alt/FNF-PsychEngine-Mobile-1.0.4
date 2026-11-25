@@ -14,12 +14,23 @@ class HealthIcon extends FlxSprite
 		scrollFactor.set();
 	}
 
+	var _lastTrackerX:Float = Math.NEGATIVE_INFINITY;
+	var _lastTrackerY:Float = Math.NEGATIVE_INFINITY;
 	override function update(elapsed:Float)
 	{
 		super.update(elapsed);
 
 		if (sprTracker != null)
-			setPosition(sprTracker.x + sprTracker.width + 12, sprTracker.y - 30);
+		{
+			var newX:Float = sprTracker.x + sprTracker.width + 12;
+			var newY:Float = sprTracker.y - 30;
+			if (newX != _lastTrackerX || newY != _lastTrackerY)
+			{
+				setPosition(newX, newY);
+				_lastTrackerX = newX;
+				_lastTrackerY = newY;
+			}
+		}
 	}
 
 	private var iconOffsets:Array<Float> = [0, 0];
