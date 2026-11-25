@@ -46,10 +46,14 @@ class Conductor
 			bpm: bpm,
 			stepCrochet: stepCrochet
 		}
+		// bpmChangeMap is built chronologically, so we can stop as soon as
+		// we pass the target time instead of scanning the whole array every call.
 		for (i in 0...Conductor.bpmChangeMap.length)
 		{
 			if (time >= Conductor.bpmChangeMap[i].songTime)
 				lastChange = Conductor.bpmChangeMap[i];
+			else
+				break;
 		}
 
 		return lastChange;
@@ -66,6 +70,8 @@ class Conductor
 		{
 			if (Conductor.bpmChangeMap[i].stepTime<=step)
 				lastChange = Conductor.bpmChangeMap[i];
+			else
+				break;
 		}
 
 		return lastChange;
