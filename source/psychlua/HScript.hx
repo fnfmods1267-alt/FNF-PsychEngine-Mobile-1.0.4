@@ -464,13 +464,20 @@ class HScript extends Iris
 	override function call(funcToRun:String, ?args:Array<Dynamic>):IrisCall {
 		if (funcToRun == null || interp == null) return null;
 
-		if (!exists(funcToRun)) {
+		// PlayState.callOnHScript already calls exists(funcToRun) before calling call() on this
+		// script, for every script, on every onUpdate/onUpdatePost/onSpawnNote/etc firing during
+		// the whole song, so the common path doesn't need a second existence check here.
+		// Map.get() returning null is ambiguous between "key absent" and "key present but null",
+		// so we still confirm with exists() before reporting a missing function - this keeps
+		// the direct-call-without-checking-first path (someone calling call() on their own)
+		// correct, it just costs one extra Map lookup only in that non-hot case.
+		var func:Dynamic = interp.variables.get(funcToRun); // function signature
+		if (func == null && !interp.variables.exists(funcToRun)) {
 			Iris.error('No function named: $funcToRun', this.interp.posInfos());
 			return null;
 		}
 
 		try {
-			var func:Dynamic = interp.variables.get(funcToRun); // function signature
 			final ret = Reflect.callMethod(null, func, args ?? []);
 			return {funName: funcToRun, signature: func, returnValue: ret};
 		}
