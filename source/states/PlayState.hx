@@ -1796,9 +1796,11 @@ class PlayState extends MusicBeatState
 			camHUD.zoom = FlxMath.lerp(1, camHUD.zoom, Math.exp(-elapsed * 3.125 * camZoomingDecay * playbackRate));
 		}
 
+		#if debug
 		FlxG.watch.addQuick("secShit", curSection);
 		FlxG.watch.addQuick("beatShit", curBeat);
 		FlxG.watch.addQuick("stepShit", curStep);
+		#end
 
 		// RESET = Quick Game Over Screen
 		if (!ClientPrefs.data.noReset && controls.RESET && canReset && !inCutscene && startedCountdown && !endingSong)
@@ -1820,11 +1822,12 @@ class PlayState extends MusicBeatState
 				notes.insert(0, dunceNote);
 				dunceNote.spawned = true;
 
-				callOnLuas('onSpawnNote', [notes.members.indexOf(dunceNote), dunceNote.noteData, dunceNote.noteType, dunceNote.isSustainNote, dunceNote.strumTime]);
+				// dunceNote was just inserted at index 0, so we already know its index
+				// without doing an O(n) indexOf scan through the whole notes group.
+				callOnLuas('onSpawnNote', [0, dunceNote.noteData, dunceNote.noteType, dunceNote.isSustainNote, dunceNote.strumTime]);
 				callOnHScript('onSpawnNote', [dunceNote]);
 
-				var index:Int = unspawnNotes.indexOf(dunceNote);
-				unspawnNotes.splice(index, 1);
+				unspawnNotes.shift();
 			}
 		}
 
@@ -1846,15 +1849,13 @@ class PlayState extends MusicBeatState
 						while(i < notes.length)
 						{
 							var daNote:Note = notes.members[i];
-							if(daNote == null) continue;
+							if(daNote == null) { i++; continue; }
 
-							var strumGroup:FlxTypedGroup<StrumNote> = playerStrums;
-							if(!daNote.mustPress) strumGroup = opponentStrums;
-
-							var strum:StrumNote = strumGroup.members[daNote.noteData];
+							var mustPress:Bool = daNote.mustPress;
+							var strum:StrumNote = (mustPress ? playerStrums : opponentStrums).members[daNote.noteData];
 							daNote.followStrumNote(strum, fakeCrochet, songSpeed / playbackRate);
 
-							if(daNote.mustPress)
+							if(mustPress)
 							{
 								if(cpuControlled && !daNote.blockHit && daNote.canBeHit && (daNote.isSustainNote || daNote.strumTime <= Conductor.songPosition))
 									goodNoteHit(daNote);
@@ -1867,7 +1868,7 @@ class PlayState extends MusicBeatState
 							// Kill extremely late notes and cause misses
 							if (Conductor.songPosition - daNote.strumTime > noteKillOffset)
 							{
-								if (daNote.mustPress && !cpuControlled && !daNote.ignoreNote && !endingSong && (daNote.tooLate || !daNote.wasGoodHit))
+								if (mustPress && !cpuControlled && !daNote.ignoreNote && !endingSong && (daNote.tooLate || !daNote.wasGoodHit))
 									noteMiss(daNote);
 
 								daNote.active = daNote.visible = false;
@@ -2499,6 +2500,7 @@ class PlayState extends MusicBeatState
 					#if DISCORD_ALLOWED DiscordClient.resetClientID(); #end
 
 					canResync = false;
+					Paths.clearUnusedMemory();
 					MusicBeatState.switchState(new StoryMenuState());
 
 					// if ()
@@ -2537,6 +2539,7 @@ class PlayState extends MusicBeatState
 				#if DISCORD_ALLOWED DiscordClient.resetClientID(); #end
 
 				canResync = false;
+				Paths.clearUnusedMemory();
 				MusicBeatState.switchState(new FreeplayState());
 				FlxG.sound.playMusic(Paths.music('freakyMenu'));
 				changedDifficulty = false;
@@ -3261,6 +3264,11 @@ class PlayState extends MusicBeatState
 		instance = null;
 		shutdownThread = true;
 		FlxG.signals.preUpdate.remove(checkForResync);
+
+		// Safety net: garantiza que el cache de Paths se libere sin importar
+		// por qué ruta se salió del PlayState (freeplay, story, pausa, game over, etc).
+		Paths.clearUnusedMemory();
+
 		super.destroy();
 	}
 
