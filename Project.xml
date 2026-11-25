@@ -167,12 +167,18 @@
 
 	<!--Enable this for Nape release builds for a serious peformance improvement-->
 	<haxedef name="NAPE_RELEASE_BUILD" unless="debug" />
+
+	<!-- HXCPP release optimizations: strips extra safety checks and enables compiler optimizations
+		 that matter on low-end Android (weaker CPUs benefit more from this than desktop does). -->
+	<haxedef name="HXCPP_NO_DEBUG_LINK" unless="debug" />
 	
 	<!--Used for crash handler-->
+	<!-- HXCPP_CHECK_POINTER and HXCPP_STACK_TRACE add per-call overhead (stack tracking for crash reports).
+		 Keeping them only on debug builds gives a real performance gain on low-end Android devices in release. -->
 	<section if="cpp">
-		<haxedef name="HXCPP_CHECK_POINTER" />
-		<haxedef name="HXCPP_STACK_LINE" />
-		<haxedef name="HXCPP_STACK_TRACE" />
+		<haxedef name="HXCPP_CHECK_POINTER" if="debug" />
+		<haxedef name="HXCPP_STACK_LINE" if="debug" />
+		<haxedef name="HXCPP_STACK_TRACE" if="debug" />
 		<haxedef name="HXCPP_CATCH_SEGV" />
 	</section>
 	
