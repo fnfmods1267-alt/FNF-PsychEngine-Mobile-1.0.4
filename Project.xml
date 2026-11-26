@@ -19,7 +19,11 @@
 		   it has caused crashes on some devices/hxcpp versions in other Haxe projects -->
 	<haxedef name="HXCPP_GC_DYNAMIC_SIZE" if="cpp" />
 	<haxedef name="HXCPP_GC_MOVING" if="cpp" />
-	<haxedef name="HXCPP_GC_GENERATIONAL" if="cpp" />
+	<!-- DISABLED for crash testing: this flag's own comment above admits it's experimental and
+		 has caused crashes on some devices/hxcpp versions. Turning it off is the single highest-
+		 value thing to test right now given random mid-song crashes with no log. If crashes stop,
+		 this was it - re-enable only after confirming on your actual target devices, one at a time. -->
+	<!-- <haxedef name="HXCPP_GC_GENERATIONAL" if="cpp" /> -->
 
 	<!--The flixel preloader is not accurate in Chrome. You can use it regularly if you embed the swf into a html file
 		or you can set the actual size of your file manually at "FlxPreloaderBase-onUpdate-bytesTotal"-->
