@@ -178,6 +178,7 @@ class PlayState extends MusicBeatState
 	public var combo:Int = 0;
 
 	public var healthBar:Bar;
+	var healthBarPercentTarget:Float = 50; // Real/instant percent. healthBar.percent itself eases toward this when Smooth Health Bar is on
 	public var timeBar:Bar;
 	var songPercent:Float = 0;
 
@@ -1369,7 +1370,29 @@ class PlayState extends MusicBeatState
 		var sectionsData:Array<SwagSection> = PlayState.SONG.notes;
 		var ghostNotesCaught:Int = 0;
 		var daBpm:Float = Conductor.bpm;
-	
+
+		// The ghost-note dupe check below used to scan the ENTIRE (ever-growing) unspawnNotes
+		// array for every single note in the chart - O(n) work per note, so O(n^2) overall.
+		// On long/dense charts (lots of notes + sustain subdivisions) that scan alone was the
+		// main cause of the freeze right when hitting play. This groups notes by
+		// (column, mustPress, noteType) so the dupe check only has to look at the handful of
+		// notes that could actually match, instead of the whole chart generated so far.
+		var unspawnNotesIndex:Map<String, Array<Note>> = [];
+		function ghostKey(column:Int, mustPress:Bool, noteType:String):String
+			return column + ':' + mustPress + ':' + noteType;
+
+		function indexNote(n:Note):Void
+		{
+			var key:String = ghostKey(n.noteData, n.mustPress, n.noteType);
+			var bucket:Array<Note> = unspawnNotesIndex.get(key);
+			if (bucket == null)
+			{
+				bucket = [];
+				unspawnNotesIndex.set(key, bucket);
+			}
+			bucket.push(n);
+		}
+
 		for (section in sectionsData)
 		{
 			if (section.changeBPM != null && section.changeBPM && section.bpm != null && daBpm != section.bpm)
@@ -1388,21 +1411,27 @@ class PlayState extends MusicBeatState
 				var gottaHitNote:Bool = (songNotes[1] < totalColumns);
 
 				if (i != 0) {
-					// CLEAR ANY POSSIBLE GHOST NOTES
-					for (evilNote in unspawnNotes) {
-						var matches: Bool = (noteColumn == evilNote.noteData && gottaHitNote == evilNote.mustPress && evilNote.noteType == noteType);
-						if (matches && Math.abs(spawnTime - evilNote.strumTime) < flixel.math.FlxMath.EPSILON) {
-							if (evilNote.tail.length > 0)
-								for (tail in evilNote.tail)
-								{
-									tail.destroy();
-									unspawnNotes.remove(tail);
-								}
-							evilNote.destroy();
-							unspawnNotes.remove(evilNote);
-							ghostNotesCaught++;
-							//continue;
+					// CLEAR ANY POSSIBLE GHOST NOTES (now only checked against the small bucket
+					// of notes that share column + mustPress + noteType, not the whole chart)
+					var bucket:Array<Note> = unspawnNotesIndex.get(ghostKey(noteColumn, gottaHitNote, noteType));
+					if (bucket != null && bucket.length > 0) {
+						var survivors:Array<Note> = [];
+						for (evilNote in bucket) {
+							if (Math.abs(spawnTime - evilNote.strumTime) < flixel.math.FlxMath.EPSILON) {
+								if (evilNote.tail.length > 0)
+									for (tail in evilNote.tail)
+									{
+										tail.destroy();
+										unspawnNotes.remove(tail);
+									}
+								evilNote.destroy();
+								unspawnNotes.remove(evilNote);
+								ghostNotesCaught++;
+								//continue;
+							}
+							else survivors.push(evilNote);
 						}
+						unspawnNotesIndex.set(ghostKey(noteColumn, gottaHitNote, noteType), survivors);
 					}
 				}
 
@@ -1416,6 +1445,7 @@ class PlayState extends MusicBeatState
 	
 				swagNote.scrollFactor.set();
 				unspawnNotes.push(swagNote);
+				indexNote(swagNote);
 
 				var curStepCrochet:Float = 60 / daBpm * 1000 / 4.0;
 				final roundSus:Int = Math.round(swagNote.sustainLength / curStepCrochet);
@@ -1434,6 +1464,7 @@ class PlayState extends MusicBeatState
 						sustainNote.parent = swagNote;
 						unspawnNotes.push(sustainNote);
 						swagNote.tail.push(sustainNote);
+						indexNote(sustainNote);
 
 						sustainNote.correctionOffset = swagNote.height / 2;
 						if(!PlayState.isPixelStage)
@@ -1755,6 +1786,7 @@ class PlayState extends MusicBeatState
 
 		updateIconsScale(elapsed);
 		updateIconsPosition();
+		updateHealthBarSmoothing(elapsed);
 
 		if (startedCountdown && !paused)
 		{
@@ -1949,11 +1981,32 @@ class PlayState extends MusicBeatState
 		// update health bar
 		health = value;
 		var newPercent:Null<Float> = FlxMath.remapToRange(FlxMath.bound(healthBar.valueFunction(), healthBar.bounds.min, healthBar.bounds.max), healthBar.bounds.min, healthBar.bounds.max, 0, 100);
-		healthBar.percent = (newPercent != null ? newPercent : 0);
+		healthBarPercentTarget = (newPercent != null ? newPercent : 0);
+		// Smooth Health Bar off (default): same as before, the bar jumps straight to the new value.
+		// Smooth Health Bar on: healthBar.percent is left alone here and eases toward healthBarPercentTarget
+		// every frame instead (see updateHealthBarSmoothing(), called from update()).
+		if(!ClientPrefs.data.smoothHealthBar) healthBar.percent = healthBarPercentTarget;
 
-		iconP1.animation.curAnim.curFrame = (healthBar.percent < 20) ? 1 : 0; //If health is under 20%, change player icon to frame 1 (losing icon), otherwise, frame 0 (normal)
-		iconP2.animation.curAnim.curFrame = (healthBar.percent > 80) ? 1 : 0; //If health is over 80%, change opponent icon to frame 1 (losing icon), otherwise, frame 0 (normal)
+		// Icon swapping always reacts to the real/instant value, not the (possibly still easing) bar fill,
+		// so turning on Smooth Health Bar doesn't make the icons lag behind the actual health.
+		iconP1.animation.curAnim.curFrame = (healthBarPercentTarget < 20) ? 1 : 0; //If health is under 20%, change player icon to frame 1 (losing icon), otherwise, frame 0 (normal)
+		iconP2.animation.curAnim.curFrame = (healthBarPercentTarget > 80) ? 1 : 0; //If health is over 80%, change opponent icon to frame 1 (losing icon), otherwise, frame 0 (normal)
 		return health;
+	}
+
+	// Eases healthBar.percent toward healthBarPercentTarget when Smooth Health Bar is enabled.
+	// Framerate-independent exponential lerp, same shape as the Conductor.songPosition smoothing
+	// a bit further down in update() - snaps once close enough to avoid an endless tiny drift.
+	public dynamic function updateHealthBarSmoothing(elapsed:Float)
+	{
+		if(!ClientPrefs.data.smoothHealthBar || healthBar == null) return;
+
+		if(Math.abs(healthBarPercentTarget - healthBar.percent) < 0.1)
+		{
+			healthBar.percent = healthBarPercentTarget;
+			return;
+		}
+		healthBar.percent = FlxMath.lerp(healthBar.percent, healthBarPercentTarget, 1 - Math.exp(-elapsed * 9));
 	}
 
 	function openPauseMenu()
@@ -3254,7 +3307,31 @@ class PlayState extends MusicBeatState
 		}
 	}
 
+	// Hard cap on simultaneously alive note splashes on low-end devices. Splashes are
+	// alpha-blended overlapping sprites (plus the per-note RGB shader when not disabled),
+	// so a fast chart with lots of consecutive hits - or a mod/mechanic that triggers
+	// extra splashes - can pile up overdraw fast. grpNoteSplashes.recycle() happily grows
+	// the group when every member is still alive, so without a cap there's no limit at all.
+	public static final LOW_QUALITY_MAX_NOTE_SPLASHES:Int = 4;
+
 	public function spawnNoteSplash(x:Float = 0, y:Float = 0, ?data:Int = 0, ?note:Note, ?strum:StrumNote) {
+		if(ClientPrefs.data.lowQuality || ClientPrefs.data.performanceMode)
+		{
+			var aliveSplashes:Int = 0;
+			for (spr in grpNoteSplashes.members)
+				if(spr != null && spr.alive) aliveSplashes++;
+
+			// Oldest-first: the group preserves insertion/recycle order, so the first
+			// alive member found is the longest-lived splash on screen.
+			if(aliveSplashes >= LOW_QUALITY_MAX_NOTE_SPLASHES)
+				for (spr in grpNoteSplashes.members)
+					if(spr != null && spr.alive)
+					{
+						spr.kill();
+						break;
+					}
+		}
+
 		var splash:NoteSplash = grpNoteSplashes.recycle(NoteSplash);
 		splash.babyArrow = strum;
 		splash.spawnSplashNote(x, y, data, note);
