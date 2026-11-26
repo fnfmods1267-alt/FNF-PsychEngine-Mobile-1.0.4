@@ -3316,10 +3316,14 @@ class PlayState extends MusicBeatState
 	// so a fast chart with lots of consecutive hits - or a mod/mechanic that triggers
 	// extra splashes - can pile up overdraw fast. grpNoteSplashes.recycle() happily grows
 	// the group when every member is still alive, so without a cap there's no limit at all.
-	public static final LOW_QUALITY_MAX_NOTE_SPLASHES:Int = 4;
-
+	//
+	// Bugfix: this used to be a hardcoded constant (LOW_QUALITY_MAX_NOTE_SPLASHES = 4) gated
+	// behind lowQuality/performanceMode, completely ignoring the "Max Note Splashes" slider in
+	// Graphics Settings - moving the slider did nothing. Now it reads ClientPrefs.data directly
+	// and respects "0 = no limit" from the option's own tooltip, independent of those two modes.
 	public function spawnNoteSplash(x:Float = 0, y:Float = 0, ?data:Int = 0, ?note:Note, ?strum:StrumNote) {
-		if(ClientPrefs.data.lowQuality || ClientPrefs.data.performanceMode)
+		var maxSplashes:Int = ClientPrefs.data.maxNoteSplashes;
+		if(maxSplashes > 0)
 		{
 			var aliveSplashes:Int = 0;
 			for (spr in grpNoteSplashes.members)
@@ -3327,7 +3331,7 @@ class PlayState extends MusicBeatState
 
 			// Oldest-first: the group preserves insertion/recycle order, so the first
 			// alive member found is the longest-lived splash on screen.
-			if(aliveSplashes >= LOW_QUALITY_MAX_NOTE_SPLASHES)
+			if(aliveSplashes >= maxSplashes)
 				for (spr in grpNoteSplashes.members)
 					if(spr != null && spr.alive)
 					{
@@ -3847,11 +3851,21 @@ class PlayState extends MusicBeatState
 
 	#if (!flash && sys)
 	public var runtimeShaders:Map<String, Array<String>> = new Map<String, Array<String>>();
+	// "Max Active Shaders" counter. Each createRuntimeShader() call that actually succeeds
+	// compiles/links a brand new GPU shader program (mods/modcharts commonly call this once
+	// per sprite they want a GLSL effect on), and that's real cost on weak GPUs if a mod spams
+	// it. There's no destroy hook here to decrement this when a shader stops being used, so it
+	// only counts upward for the song's duration - which matches the option's own tooltip text
+	// ("Limits how many Runtime Shaders can run at once during a song").
+	public var activeRuntimeShaderCount:Int = 0;
 	#end
 	public function createRuntimeShader(shaderName:String):ErrorHandledRuntimeShader
 	{
 		#if (!flash && sys)
 		if(!ClientPrefs.data.shaders) return new ErrorHandledRuntimeShader(shaderName);
+
+		if(ClientPrefs.data.maxActiveShaders > 0 && activeRuntimeShaderCount >= ClientPrefs.data.maxActiveShaders)
+			return new ErrorHandledRuntimeShader(shaderName);
 
 		if(!runtimeShaders.exists(shaderName) && !initLuaShader(shaderName))
 		{
@@ -3860,6 +3874,7 @@ class PlayState extends MusicBeatState
 		}
 
 		var arr:Array<String> = runtimeShaders.get(shaderName);
+		activeRuntimeShaderCount++;
 		return new ErrorHandledRuntimeShader(shaderName, arr[0], arr[1]);
 		#else
 		FlxG.log.warn("Platform unsupported for Runtime Shaders!");
