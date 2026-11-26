@@ -413,7 +413,7 @@ class Note extends FlxSprite
 		var customSkin:String = skin + skinPostfix;
 		var path:String = PlayState.isPixelStage ? 'pixelUI/' : '';
 		var cacheKey:String = path + customSkin;
-		var exists:Bool = _skinExistsCache.get(cacheKey);
+		var exists:Null<Bool> = _skinExistsCache.get(cacheKey);
 		if (exists == null)
 		{
 			// Solo la PRIMERA vez que se ve este skin+path se toca el filesystem;
