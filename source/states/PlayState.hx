@@ -1753,7 +1753,11 @@ class PlayState extends MusicBeatState
 			}
 		}
 		else FlxG.camera.followLerp = 0;
-		callOnScripts('onUpdate', [elapsed]);
+		// callOnScripts() itself early-exits with no allocation when no Lua/HScript is loaded,
+		// but the [elapsed] array literal below was still being built at the call site every
+		// single frame regardless - this guards that allocation too, since it's the one per-frame
+		// alloc here that none of the Low Quality/Performance Mode/splash/shader caps touch.
+		if(!(luaArrayEmpty() && hscriptArrayEmpty())) callOnScripts('onUpdate', [elapsed]);
 
 		super.update(elapsed);
 
@@ -1936,7 +1940,7 @@ class PlayState extends MusicBeatState
 		#end
 
 		setOnScripts('botPlay', cpuControlled);
-		callOnScripts('onUpdatePost', [elapsed]);
+		if(!(luaArrayEmpty() && hscriptArrayEmpty())) callOnScripts('onUpdatePost', [elapsed]);
 	}
 
 	// Health icon updaters
