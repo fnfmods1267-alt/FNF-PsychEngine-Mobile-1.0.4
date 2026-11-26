@@ -7,6 +7,7 @@ import openfl.text.TextField;
 import openfl.text.TextFormat;
 import openfl.system.System as OpenFlSystem;
 import lime.system.System as LimeSystem;
+import backend.CoolUtil;
 
 /**
 	The FPS class provides an easy-to-use monitor to display
@@ -71,14 +72,40 @@ class FPSCounter extends TextField
 
 	public dynamic function updateText():Void // so people can override it in hscript
 	{
-		text = 
-		'FPS: $currentFPS' + 
-		'\nMemory: ${flixel.util.FlxStringUtil.formatBytes(memoryMegas)}' +
-		os;
+		// New Fps Counter (Graphics options): shows FPS only, Memory only, or Both.
+		// The OS/API line is no longer shown regardless of this setting.
+		var newText:String = '';
+		switch(ClientPrefs.data.fpsCounterMode)
+		{
+			case 'FPS':
+				newText = 'FPS: $currentFPS';
+			case 'Memory':
+				newText = 'Uso de RAM: ${formatMemoryMB()} MB';
+			default: // 'Both', or anything unrecognized falls back to showing everything
+				newText = 'FPS: $currentFPS' + '\nUso de RAM: ${formatMemoryMB()} MB';
+		}
+		text = newText;
 
 		textColor = 0xFFFFFFFF;
 		if (currentFPS < FlxG.stage.window.frameRate * 0.5)
 			textColor = 0xFFFF0000;
+	}
+
+	// memoryMegas is actually a raw byte count (see get_memoryMegas below, despite the misleading name).
+	// FlxStringUtil.formatBytes() used to auto-pick KB/MB/GB; the new overlay always wants a fixed
+	// "####.## MB" shape (2 decimals, never scientific/auto-unit), so this formats it manually instead.
+	private function formatMemoryMB():String
+	{
+		var rawMB:Float = memoryMegas / (1024 * 1024);
+		var rounded:Float = CoolUtil.floorDecimal(rawMB, 2);
+		var intPart:Int = Std.int(rounded);
+		var decPart:Int = Std.int(Math.round((rounded - intPart) * 100));
+		if (decPart >= 100)
+		{
+			intPart++;
+			decPart -= 100;
+		}
+		return intPart + '.' + (decPart < 10 ? '0' : '') + decPart;
 	}
 
 	var deltaTimeout:Float = 0.0;
