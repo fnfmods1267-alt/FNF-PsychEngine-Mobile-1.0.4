@@ -2636,6 +2636,38 @@ class PlayState extends MusicBeatState
 
 	// Stores Ratings and Combo Sprites in a group
 	public var comboGroup:FlxSpriteGroup;
+
+	// --- Low-end optimization: sprite pooling for popUpScore() ---
+	// popUpScore() used to `new FlxSprite()` + destroy() up to 5 sprites (rating, combo,
+	// up to 3 combo digits) on EVERY note hit. On dense charts that's constant alloc/GC
+	// churn, which is one of the biggest causes of stutter on low-end Android. Instead we
+	// keep small recyclable pools and just reset+reuse sprites that are already dead.
+	private var ratingSpritePool:Array<FlxSprite> = [];
+	private var comboSpritePool:Array<FlxSprite> = [];
+	private var numberSpritePool:Array<FlxSprite> = [];
+
+	private function getPooledSprite(pool:Array<FlxSprite>):FlxSprite
+	{
+		var spr:FlxSprite = null;
+		var i:Int = pool.length - 1;
+		while (i >= 0)
+		{
+			if (!pool[i].alive)
+			{
+				spr = pool[i];
+				break;
+			}
+			i--;
+		}
+		if (spr == null)
+		{
+			spr = new FlxSprite();
+			pool.push(spr);
+		}
+		spr.revive();
+		spr.active = false; // these are purely visual, no physics step needed from FlxState
+		return spr;
+	}
 	// Stores HUD Objects in a Group
 	public var uiGroup:FlxSpriteGroup;
 	// Stores Note Objects in a Group
@@ -2665,12 +2697,16 @@ class PlayState extends MusicBeatState
 				if(spr == null) continue;
 
 				comboGroup.remove(spr);
-				spr.destroy();
+				FlxTween.cancelTweensOf(spr); // cancel any pending fade-out so its onComplete
+				                              // can't kill() this sprite again after it's been
+				                              // handed back out to a newer popUpScore() call
+				spr.kill(); // was spr.destroy(): kill() just marks it dead/invisible so the
+				            // pool can hand it straight back out instead of rebuilding it
 			}
 		}
 
 		var placement:Float = FlxG.width * 0.35;
-		var rating:FlxSprite = new FlxSprite();
+		var rating:FlxSprite = getPooledSprite(ratingSpritePool); // was: new FlxSprite()
 		var score:Int = 350;
 
 		//tryna do MS based judgment due to popular demand
@@ -2705,6 +2741,8 @@ class PlayState extends MusicBeatState
 
 		if (ClientPrefs.data.popUpRating)
 		{
+			rating.scale.set(1, 1); // reset leftover scale/offset from a previous pooled use
+			rating.alpha = 1;
 			rating.loadGraphic(Paths.image(uiFolder + daRating.image + uiPostfix));
 			rating.screenCenter();
 			rating.x = placement - 40;
@@ -2717,7 +2755,10 @@ class PlayState extends MusicBeatState
 			rating.y -= ClientPrefs.data.comboOffset[1];
 			rating.antialiasing = antialias;
 
-			var comboSpr:FlxSprite = new FlxSprite().loadGraphic(Paths.image(uiFolder + 'combo' + uiPostfix));
+			var comboSpr:FlxSprite = getPooledSprite(comboSpritePool); // was: new FlxSprite().loadGraphic(...)
+			comboSpr.scale.set(1, 1);
+			comboSpr.alpha = 1;
+			comboSpr.loadGraphic(Paths.image(uiFolder + 'combo' + uiPostfix));
 			comboSpr.screenCenter();
 			comboSpr.x = placement;
 			comboSpr.acceleration.y = FlxG.random.int(200, 300) * playbackRate * playbackRate;
@@ -2752,7 +2793,10 @@ class PlayState extends MusicBeatState
 			var separatedScore:String = Std.string(combo).lpad('0', 3);
 			for (i in 0...separatedScore.length)
 			{
-				var numScore:FlxSprite = new FlxSprite().loadGraphic(Paths.image(uiFolder + 'num' + Std.parseInt(separatedScore.charAt(i)) + uiPostfix));
+				var numScore:FlxSprite = getPooledSprite(numberSpritePool); // was: new FlxSprite().loadGraphic(...)
+				numScore.scale.set(1, 1);
+				numScore.alpha = 1;
+				numScore.loadGraphic(Paths.image(uiFolder + 'num' + Std.parseInt(separatedScore.charAt(i)) + uiPostfix));
 				numScore.screenCenter();
 				numScore.x = placement + (43 * daLoop) - 90 + ClientPrefs.data.comboOffset[2];
 				numScore.y += 80 - ClientPrefs.data.comboOffset[3];
@@ -2776,7 +2820,7 @@ class PlayState extends MusicBeatState
 				FlxTween.tween(numScore, {alpha: 0}, 0.2 / playbackRate, {
 					onComplete: function(tween:FlxTween)
 					{
-						numScore.destroy();
+						numScore.kill(); // was numScore.destroy(): keep the sprite+bitmap alive in the pool
 					},
 					startDelay: Conductor.crochet * 0.002 / playbackRate
 				});
@@ -2793,8 +2837,8 @@ class PlayState extends MusicBeatState
 			FlxTween.tween(comboSpr, {alpha: 0}, 0.2 / playbackRate, {
 				onComplete: function(tween:FlxTween)
 				{
-					comboSpr.destroy();
-					rating.destroy();
+					comboSpr.kill(); // was comboSpr.destroy()/rating.destroy(): return both to their pools
+					rating.kill();
 				},
 				startDelay: Conductor.crochet * 0.002 / playbackRate
 			});
@@ -3052,7 +3096,13 @@ class PlayState extends MusicBeatState
 		// the same class of bug we just fixed in Character.hx. If you control every
 		// script this engine will run, this is a safe place to drop the indexOf and
 		// pass -1 or the note object instead.
-		var result:Dynamic = callOnLuas('noteMiss', [notes.members.indexOf(daNote), daNote.noteData, daNote.noteType, daNote.isSustainNote]);
+		// Guard added: skip the indexOf() scan (and the array literal) entirely when no
+		// Lua/HScript is loaded, instead of always paying for it before callOnLuas's own
+		// early-exit even gets a chance to run. The index itself is left untouched so any
+		// mod that does run still gets the exact same argument it always has.
+		var result:Dynamic = LuaUtils.Function_Continue;
+		if(!(luaArrayEmpty() && hscriptArrayEmpty()))
+			result = callOnLuas('noteMiss', [notes.members.indexOf(daNote), daNote.noteData, daNote.noteType, daNote.isSustainNote]);
 		if(result != LuaUtils.Function_Stop && result != LuaUtils.Function_StopHScript && result != LuaUtils.Function_StopAll) callOnHScript('noteMiss', [daNote]);
 	}
 
@@ -3149,7 +3199,11 @@ class PlayState extends MusicBeatState
 
 	function opponentNoteHit(note:Note):Void
 	{
-		var result:Dynamic = callOnLuas('opponentNoteHitPre', [notes.members.indexOf(note), Math.abs(note.noteData), note.noteType, note.isSustainNote]);
+		// Guard added: same reasoning as noteMiss() above - skip the indexOf() scan and
+		// array literal when there's nothing loaded to receive them.
+		var result:Dynamic = LuaUtils.Function_Continue;
+		if(!(luaArrayEmpty() && hscriptArrayEmpty()))
+			result = callOnLuas('opponentNoteHitPre', [notes.members.indexOf(note), Math.abs(note.noteData), note.noteType, note.isSustainNote]);
 		if(result != LuaUtils.Function_Stop && result != LuaUtils.Function_StopHScript && result != LuaUtils.Function_StopAll) result = callOnHScript('opponentNoteHitPre', [note]);
 
 		if(result == LuaUtils.Function_Stop) return;
@@ -3189,7 +3243,10 @@ class PlayState extends MusicBeatState
 		note.hitByOpponent = true;
 		
 		stagesFunc(function(stage:BaseStage) stage.opponentNoteHit(note));
-		var result:Dynamic = callOnLuas('opponentNoteHit', [notes.members.indexOf(note), Math.abs(note.noteData), note.noteType, note.isSustainNote]);
+		// Guard added: same reasoning as noteMiss() above.
+		var result:Dynamic = LuaUtils.Function_Continue;
+		if(!(luaArrayEmpty() && hscriptArrayEmpty()))
+			result = callOnLuas('opponentNoteHit', [notes.members.indexOf(note), Math.abs(note.noteData), note.noteType, note.isSustainNote]);
 		if(result != LuaUtils.Function_Stop && result != LuaUtils.Function_StopHScript && result != LuaUtils.Function_StopAll) callOnHScript('opponentNoteHit', [note]);
 
 		if (!note.isSustainNote) invalidateNote(note);
@@ -3204,7 +3261,11 @@ class PlayState extends MusicBeatState
 		var leData:Int = Math.round(Math.abs(note.noteData));
 		var leType:String = note.noteType;
 
-		var result:Dynamic = callOnLuas('goodNoteHitPre', [notes.members.indexOf(note), leData, leType, isSus]);
+		// Guard added: same reasoning as noteMiss() above - this is the most-called of the
+		// six indexOf() sites since it runs on every successfully hit note.
+		var result:Dynamic = LuaUtils.Function_Continue;
+		if(!(luaArrayEmpty() && hscriptArrayEmpty()))
+			result = callOnLuas('goodNoteHitPre', [notes.members.indexOf(note), leData, leType, isSus]);
 		if(result != LuaUtils.Function_Stop && result != LuaUtils.Function_StopHScript && result != LuaUtils.Function_StopAll) result = callOnHScript('goodNoteHitPre', [note]);
 
 		if(result == LuaUtils.Function_Stop) return;
@@ -3292,7 +3353,10 @@ class PlayState extends MusicBeatState
 		}
 
 		stagesFunc(function(stage:BaseStage) stage.goodNoteHit(note));
-		var result:Dynamic = callOnLuas('goodNoteHit', [notes.members.indexOf(note), leData, leType, isSus]);
+		// Guard added: same reasoning as noteMiss() above.
+		var result:Dynamic = LuaUtils.Function_Continue;
+		if(!(luaArrayEmpty() && hscriptArrayEmpty()))
+			result = callOnLuas('goodNoteHit', [notes.members.indexOf(note), leData, leType, isSus]);
 		if(result != LuaUtils.Function_Stop && result != LuaUtils.Function_StopHScript && result != LuaUtils.Function_StopAll) callOnHScript('goodNoteHit', [note]);
 		if(!note.isSustainNote) invalidateNote(note);
 	}
