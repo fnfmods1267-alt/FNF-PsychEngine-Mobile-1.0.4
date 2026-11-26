@@ -9,7 +9,7 @@ jobs:
       matrix:
         include:
           - name: Android
-            os: macos-15
+            os: ubuntu-latest
             buildArgs: "android -ONLY_ARMV7"
             setupCommand: sh ./setup/unix.sh
             artifactName: androidBuild
