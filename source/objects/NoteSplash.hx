@@ -30,6 +30,8 @@ typedef NoteSplashConfig = {
 class NoteSplash extends FlxSprite
 {
 	public var rgbShader:PixelSplashShaderRef;
+	// Shared scratch object for spawnSplashNote() below - see the comment there.
+	static var _scratchRGB:RGBPalette;
 	public var texture:String;
 	public var config(default, set):NoteSplashConfig;
 	public var babyArrow:StrumNote;
@@ -220,13 +222,28 @@ class NoteSplash extends FlxSprite
 		this.noteData = noteData;
 		var anim:String = playDefaultAnim();
 
-		var tempShader:RGBPalette = null;
+		// Reused scratch RGBPalette instead of `new RGBPalette()` on every single splash
+		// spawn: RGBPalette's constructor also builds a brand new RGBPaletteShader (a full
+		// GPU shader object), which was previously being thrown away a few lines later once
+		// copyValues() finished reading its values. On a fast chart with lots of consecutive
+		// hits, that's a new shader allocation on basically every note - now it's zero.
+		if (_scratchRGB == null) _scratchRGB = new RGBPalette();
+		var tempShader:RGBPalette = _scratchRGB;
+		var usedTempShader:Bool = false;
 		if (config.allowRGB)
 		{
 			Note.initializeGlobalRGBShader(noteData % Note.colArray.length);
 			if (inEditor || (note == null || note.noteSplashData.useRGBShader) && (PlayState.SONG == null || !PlayState.SONG.disableNoteRGB))
 			{
-				tempShader = new RGBPalette();
+				usedTempShader = true;
+				// Reset the reused scratch object to the same defaults a fresh `new RGBPalette()`
+				// would have had, since it's now shared across calls and could otherwise leak an
+				// untouched channel's value from whichever splash used it last (e.g. configs that
+				// only define r/g but not b).
+				tempShader.r = 0xFFFF0000;
+				tempShader.g = 0xFF00FF00;
+				tempShader.b = 0xFF0000FF;
+				tempShader.mult = 1.0;
 				// If Note RGB is enabled:
 				if ((note == null || !note.noteSplashData.useGlobalShader) || inEditor)
 				{
@@ -275,7 +292,10 @@ class NoteSplash extends FlxSprite
 				else tempShader.copyValues(Note.globalRgbShaders[noteData % Note.colArray.length]);
 			}
 		}
-		rgbShader.copyValues(tempShader);
+		// Preserve the original semantics exactly: copyValues(null) is what used to happen
+		// when tempShader was never assigned (config.allowRGB false, or neither RGB branch
+		// taken) - it disables the splash's shader instead of applying stale scratch values.
+		rgbShader.copyValues(usedTempShader ? tempShader : null);
 		if (!config.allowPixel) rgbShader.pixelAmount = 1;
 		else if (PlayState.isPixelStage) rgbShader.pixelAmount = 6;
 

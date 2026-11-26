@@ -274,7 +274,11 @@ class Note extends FlxSprite
 		if(noteData > -1)
 		{
 			rgbShader = new RGBShaderReference(this, initializeGlobalRGBShader(noteData));
-			if(PlayState.SONG != null && PlayState.SONG.disableNoteRGB) rgbShader.enabled = false;
+			// Respect the "Shaders" low-end toggle too, not just the song's disableNoteRGB flag:
+			// this shader runs per note, so on dense charts it's one of the biggest avoidable
+			// GPU costs on low-end devices when the player has already asked to disable shaders.
+			if(!ClientPrefs.data.shaders || (PlayState.SONG != null && PlayState.SONG.disableNoteRGB))
+				rgbShader.enabled = false;
 			texture = '';
 
 			x += swagWidth * (noteData);
