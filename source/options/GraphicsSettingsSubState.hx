@@ -25,6 +25,18 @@ class GraphicsSettingsSubState extends BaseOptionsMenu
 			BOOL); //Variable type
 		addOption(option);
 
+		var option:Option = new Option('Performance Mode', //Name
+			'Same effect as Low Quality (simpler backgrounds, splash cap),\nbut does NOT disable Shaders.', //Description
+			'performanceMode',
+			BOOL);
+		addOption(option);
+
+		var option:Option = new Option('Smooth Health Bar', //Name
+			"If checked, the health bar eases toward its new value\ninstead of jumping instantly when you gain or lose health.",
+			'smoothHealthBar',
+			BOOL);
+		addOption(option);
+
 		var option:Option = new Option('Anti-Aliasing',
 			'If unchecked, disables anti-aliasing, increases performance\nat the cost of sharper visuals.',
 			'antialiasing',
@@ -43,6 +55,39 @@ class GraphicsSettingsSubState extends BaseOptionsMenu
 			"If checked, allows the GPU to be used for caching textures, decreasing RAM usage.\nDon't turn this on if you have a shitty Graphics Card.", //Description
 			'cacheOnGPU',
 			BOOL);
+		addOption(option);
+
+		var option:Option = new Option('Max Note Splashes', //Name
+			"Limits how many note splashes can be on screen at once.\nLower values improve performance on weaker " + Main.platform + ".\nSet to 0 for no limit.", //Description
+			'maxNoteSplashes',
+			INT);
+		option.minValue = 0;
+		option.maxValue = 20;
+		option.displayFormat = '%v';
+		option.scrollSpeed = 2;
+		addOption(option);
+
+		var option:Option = new Option('Max Active Shaders', //Name
+			"Limits how many Runtime Shaders can run at once during a song.\nLower values improve performance on weaker " + Main.platform + ".\nSet to 0 for no limit.", //Description
+			'maxActiveShaders',
+			INT);
+		option.minValue = 0;
+		option.maxValue = 20;
+		option.displayFormat = '%v';
+		option.scrollSpeed = 2;
+		addOption(option);
+
+		var option:Option = new Option('Aggressive Memory Cleanup', //Name
+			"If checked, forces a heavy garbage collection pass every time\nyou resume from the Pause menu. Can reduce RAM usage at the\ncost of a short freeze when resuming.", //Description
+			'aggressiveMemoryCleanup',
+			BOOL);
+		addOption(option);
+
+		var option:Option = new Option('New Fps Counter', //Name
+			"Chooses what the performance overlay shows: just the FPS,\njust the memory usage, or both. It no longer shows the\ndevice's OS or API info.", //Description
+			'fpsCounterMode',
+			STRING,
+			['FPS', 'Memory', 'Both']);
 		addOption(option);
 
 		#if !html5 //Apparently other framerates isn't correctly supported on Browser? Probably it has some V-Sync shit enabled by default, idk
