@@ -189,7 +189,13 @@ class Note extends FlxSprite
 		var arr:Array<FlxColor> = ClientPrefs.data.arrowRGB[noteData];
 		if(PlayState.isPixelStage) arr = ClientPrefs.data.arrowRGBPixel[noteData];
 
-		if (arr != null && noteData > -1 && noteData <= arr.length)
+		// Bugfix: this used to check "noteData <= arr.length", comparing the column index
+		// against the length of the 3-element [r,g,b] array - that's always true for the
+		// standard 4 keys (0..3 <= 3) by coincidence, but on 5K/6K+ charts or custom keybind
+		// counts it silently falls back to the hardcoded red/green/blue default instead of
+		// the player's configured note colors. What this actually needs to validate is that
+		// the per-note color array itself has all 3 channels before reading arr[0..2].
+		if (arr != null && arr.length > 2)
 		{
 			rgbShader.r = arr[0];
 			rgbShader.g = arr[1];
@@ -350,7 +356,11 @@ class Note extends FlxSprite
 			var newRGB:RGBPalette = new RGBPalette();
 			var arr:Array<FlxColor> = (!PlayState.isPixelStage) ? ClientPrefs.data.arrowRGB[noteData] : ClientPrefs.data.arrowRGBPixel[noteData];
 			
-			if (arr != null && noteData > -1 && noteData <= arr.length)
+			// Same bugfix as defaultRGB() above - validate the color array itself, not the
+			// column index against its length. This one matters even more: it feeds the
+			// *shared/global* per-column shader cache, so a wrong fallback here gets reused
+			// by every note in that column for the rest of the song.
+			if (arr != null && arr.length > 2)
 			{
 				newRGB.r = arr[0];
 				newRGB.g = arr[1];
