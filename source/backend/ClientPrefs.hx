@@ -25,6 +25,7 @@ import states.TitleState;
 	public var middleScroll:Bool = false;
 	public var opponentStrums:Bool = true;
 	public var showFPS:Bool = true;
+	public var fpsCounterMode:String = 'Both'; // 'FPS', 'Memory' or 'Both'. OS/API info is no longer shown regardless of this.
 	public var flashing:Bool = true;
 	public var autoPause:Bool = true;
 	public var antialiasing:Bool = true;
@@ -32,8 +33,13 @@ import states.TitleState;
 	public var splashSkin:String = 'Psych';
 	public var splashAlpha:Float = 0.6;
 	public var lowQuality:Bool = false;
+	public var performanceMode:Bool = false; // Same visual/splash-cap effect as Low Quality, but never touches shaders and is excluded from the 'toastie' achievement check
+	public var smoothHealthBar:Bool = false; // If true, the health bar's fill eases toward its value instead of jumping instantly
 	public var shaders:Bool = true;
 	public var cacheOnGPU:Bool = #if !switch false #else true #end; // GPU Caching made by Raltyro
+	public var maxNoteSplashes:Int = 4; // 0 = no limit
+	public var aggressiveMemoryCleanup:Bool = false;
+	public var maxActiveShaders:Int = 0; // 0 = no limit
 	public var framerate:Int = 60;
 	public var camZooms:Bool = true;
 	public var hideHud:Bool = false;

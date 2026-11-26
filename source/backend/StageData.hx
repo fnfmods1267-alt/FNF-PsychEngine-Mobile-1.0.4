@@ -221,7 +221,8 @@ class StageData {
 		else if((filters & FREEPLAY) == FREEPLAY)
 			if(PlayState.isStoryMode) return false;
 
-		return ((ClientPrefs.data.lowQuality && (filters & LOW_QUALITY) == LOW_QUALITY) ||
-			(!ClientPrefs.data.lowQuality && (filters & HIGH_QUALITY) == HIGH_QUALITY));
+		var wantsLowQuality:Bool = (ClientPrefs.data.lowQuality || ClientPrefs.data.performanceMode);
+		return ((wantsLowQuality && (filters & LOW_QUALITY) == LOW_QUALITY) ||
+			(!wantsLowQuality && (filters & HIGH_QUALITY) == HIGH_QUALITY));
 	}
 }
