@@ -15,7 +15,7 @@
 		 stutters on cpp targets. See https://haxe.org/manual/target-cpp-defines.html
 		 - HXCPP_GC_DYNAMIC_SIZE: lets working memory grow instead of collecting so often (biggest win here)
 		 - HXCPP_GC_MOVING: compacts memory to reduce fragmentation-driven collections
-		 REMOVED: HXCPP_GC_GENERATIONAL - docs mark it "experimental"; it caused a crash spike here.
+		 REMOVED: HXCPP_GC_GENERATIONAL - docs mark it "experimental"; it caused a crash spike here. -->
 	<haxedef name="HXCPP_GC_DYNAMIC_SIZE" if="cpp" />
 	<haxedef name="HXCPP_GC_MOVING" if="cpp" />
 
@@ -38,7 +38,14 @@
 	<define name="COPYSTATE_ALLOWED" if="MODS_ALLOWED mobile"/>
 	<define name="IRIS_DEBUG"/>
 	
-	<define name="MULTITHREADED_LOADING" if="cpp" /> <!-- UNCOMMENTING THIS LINE WILL ENABLE MULTITHREADED LOADING, WHICH IMPROVES LOADING TIMES, BUT WITH A LOW CHANCE FOR THE GAME FREEZE ON SONG LOAD -->
+	<!-- DISABLED for low-end Android: this engine's own comment already flags a "low chance"
+		 of freeze on song load, and that risk compounds with HXCPP_GC_MOVING below - threaded
+		 loading means more threads touching memory while the GC is mid-move, which is exactly
+		 the known hxcpp bug pattern (HaxeFoundation/hxcpp#636) that causes a use of a stale,
+		 already-moved pointer -> crash. Faster load times aren't worth that trade on weak CPUs
+		 with fewer cores, where the race window is more likely to get hit in the first place.
+	<define name="MULTITHREADED_LOADING" if="cpp" /> -->
+	<!-- was: UNCOMMENTING THIS LINE WILL ENABLE MULTITHREADED LOADING, WHICH IMPROVES LOADING TIMES, BUT WITH A LOW CHANCE FOR THE GAME FREEZE ON SONG LOAD -->
 	<define name="SHOW_LOADING_SCREEN" />
 	<define name="PSYCH_WATERMARKS"/> <!-- DELETE THIS TO REMOVE THE PSYCH LOGO FROM LOADING SCREEN -->
 
