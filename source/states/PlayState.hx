@@ -2660,6 +2660,15 @@ class PlayState extends MusicBeatState
 
 	private static inline var MAX_POOL_SIZE:Int = 12; // generoso para combos de 3 dígitos + rating + combo text
 
+	// Token de pertenencia por sprite: cada vez que un sprite sale del pool para un uso nuevo,
+	// se le asigna un número de "generación" propio. El closure de cada onComplete guarda la
+	// generación que tenía SU sprite al momento de crearse; si para cuando el tween termina esa
+	// generación ya no coincide con la actual del sprite, quiere decir que otro popUpScore()
+	// ya lo reciclió antes de que el callback viejo corriera, así que el callback viejo no hace
+	// nada (en vez de matar un sprite que ya está mostrando otra nota/combo).
+	private var spriteGeneration:Map<FlxSprite, Int> = new Map<FlxSprite, Int>();
+	private var generationCounter:Int = 0;
+
 	private function getPooledSprite(pool:Array<FlxSprite>):FlxSprite
 	{
 		var spr:FlxSprite = null;
@@ -2697,11 +2706,25 @@ class PlayState extends MusicBeatState
 			// nunca después. Si el tween de fade-out de un uso anterior todavía no
 			// corrió su onComplete (el que hace kill()), cancelarlo aquí evita que ese
 			// callback mate el sprite DESPUÉS de que ya fue reutilizado en esta llamada.
+			// (Esto cubre el caso normal; el chequeo de generación de abajo cubre el caso
+			// borde en que el onComplete viejo ya estaba a mitad de ejecutarse ese mismo
+			// frame y por eso no llegó a cancelarse a tiempo.)
 			FlxTween.cancelTweensOf(spr);
 		}
 		spr.revive();
 		spr.active = false; // these are purely visual, no physics step needed from FlxState
+		generationCounter++;
+		spriteGeneration.set(spr, generationCounter);
 		return spr;
+	}
+
+	// true si `spr` sigue siendo el mismo "uso" que tenía cuando se guardó `gen` (con
+	// generationCounter en ese momento). false si ya fue reciclado por otra llamada mientras
+	// tanto, y por lo tanto un kill() de un callback viejo debe ignorarse.
+	private inline function isSameSpriteGeneration(spr:FlxSprite, gen:Int):Bool
+	{
+		var current:Null<Int> = spriteGeneration.get(spr);
+		return current != null && current == gen;
 	}
 	// Stores HUD Objects in a Group
 	public var uiGroup:FlxSpriteGroup;
@@ -2859,10 +2882,15 @@ class PlayState extends MusicBeatState
 				if (showComboNum)
 					comboGroup.add(numScore);
 
+				var numScoreGen:Int = spriteGeneration.get(numScore);
 				FlxTween.tween(numScore, {alpha: 0}, 0.2 / playbackRate, {
 					onComplete: function(tween:FlxTween)
 					{
-						numScore.kill(); // was numScore.destroy(): keep the sprite+bitmap alive in the pool
+						// Si otra llamada a popUpScore() ya recicló este sprite antes de que
+						// este callback corriera, no lo matamos: ya está siendo usado para
+						// otra nota/combo y un kill() acá lo cortaría a mitad de uso.
+						if (isSameSpriteGeneration(numScore, numScoreGen))
+							numScore.kill(); // was numScore.destroy(): keep the sprite+bitmap alive in the pool
 					},
 					startDelay: Conductor.crochet * 0.002 / playbackRate
 				});
@@ -2876,11 +2904,18 @@ class PlayState extends MusicBeatState
 				startDelay: Conductor.crochet * 0.001 / playbackRate
 			});
 
+			var comboSprGen:Int = spriteGeneration.get(comboSpr);
+			var ratingGen:Int = spriteGeneration.get(rating);
 			FlxTween.tween(comboSpr, {alpha: 0}, 0.2 / playbackRate, {
 				onComplete: function(tween:FlxTween)
 				{
-					comboSpr.kill(); // was comboSpr.destroy()/rating.destroy(): return both to their pools
-					rating.kill();
+					// Mismo chequeo que arriba, pero por separado para cada sprite: pueden
+					// haber sido reciclados en momentos distintos, así que cada uno se
+					// valida contra su propia generación antes de matarlo.
+					if (isSameSpriteGeneration(comboSpr, comboSprGen))
+						comboSpr.kill(); // was comboSpr.destroy()/rating.destroy(): return both to their pools
+					if (isSameSpriteGeneration(rating, ratingGen))
+						rating.kill();
 				},
 				startDelay: Conductor.crochet * 0.002 / playbackRate
 			});
