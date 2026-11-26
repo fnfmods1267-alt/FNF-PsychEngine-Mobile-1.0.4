@@ -379,7 +379,14 @@ class Note extends FlxSprite
 	}
 
 	var _lastNoteOffX:Float = 0;
-	static var _lastValidChecked:String; //optimization
+	// Cache por skin, no solo el último: con 4 columnas alternando color (purple/blue/green/red),
+	// un cache de un solo slot (el _lastValidChecked de antes) casi nunca pegaba, porque la
+	// siguiente nota casi siempre pedía un skin distinto al que quedó guardado. Eso hacía que
+	// Paths.fileExists() (I/O de assets) se llamara en casi cada nota instanciada. Este Map
+	// recuerda el resultado de CADA skin ya consultado en esta sesión de PlayState, así que
+	// cada combinación custom+postfix solo pega el filesystem una vez en total, sin importar
+	// en qué orden lleguen las columnas.
+	static var _skinExistsCache:Map<String, Bool> = new Map<String, Bool>();
 	public var originalHeight:Float = 6;
 	public var correctionOffset:Float = 0; //dont mess with this
 	public function reloadNote(texture:String = '', postfix:String = '') {
@@ -405,12 +412,20 @@ class Note extends FlxSprite
 		var skinPostfix:String = getNoteSkinPostfix();
 		var customSkin:String = skin + skinPostfix;
 		var path:String = PlayState.isPixelStage ? 'pixelUI/' : '';
-		if(customSkin == _lastValidChecked || Paths.fileExists('images/' + path + customSkin + '.png', IMAGE))
+		var cacheKey:String = path + customSkin;
+		var exists:Bool = _skinExistsCache.get(cacheKey);
+		if (exists == null)
 		{
-			skin = customSkin;
-			_lastValidChecked = customSkin;
+			// Solo la PRIMERA vez que se ve este skin+path se toca el filesystem;
+			// de ahí en más (sin importar el orden de columnas) es una lookup de Map en memoria.
+			exists = Paths.fileExists('images/' + path + customSkin + '.png', IMAGE);
+			_skinExistsCache.set(cacheKey, exists);
 		}
-		else skinPostfix = '';
+
+		if (exists)
+			skin = customSkin;
+		else
+			skinPostfix = '';
 
 		if(PlayState.isPixelStage) {
 			if(isSustainNote) {
@@ -449,11 +464,22 @@ class Note extends FlxSprite
 			animation.play(animName, true);
 	}
 
+	static var _lastNoteSkinPref:String = null;
 	public static function getNoteSkinPostfix()
 	{
 		var skin:String = '';
 		if(ClientPrefs.data.noteSkin != ClientPrefs.defaultData.noteSkin)
 			skin = '-' + ClientPrefs.data.noteSkin.trim().toLowerCase().replace(' ', '_');
+
+		// Si el noteskin elegido por el usuario cambió desde la última vez que se llamó esto
+		// (ej. lo cambió en Opciones sin reiniciar la app), los resultados viejos cacheados en
+		// _skinExistsCache ya no sirven - eran para otro postfix. Lo detectamos acá, en el único
+		// lugar donde se lee la preferencia, y limpiamos el cache solo cuando de verdad cambió.
+		if (_lastNoteSkinPref != skin)
+		{
+			_skinExistsCache.clear();
+			_lastNoteSkinPref = skin;
+		}
 		return skin;
 	}
 
@@ -527,7 +553,6 @@ class Note extends FlxSprite
 	override public function destroy()
 	{
 		super.destroy();
-		_lastValidChecked = '';
 	}
 
 	public function followStrumNote(myStrum:StrumNote, fakeCrochet:Float, songSpeed:Float = 1)
@@ -604,23 +629,22 @@ class Note extends FlxSprite
 				}
 			}
 
-			// Only trigger the (costly) clipRect setter when something actually changed
-			if (changed) clipRect = swagRect;
+			// clipRect in FlxSprite is a plain field, not a property with a real setter -
+			// the old code here had an `override function set_clipRect` that doesn't actually
+			// override anything in Flixel (clipRect has no setter to override), so
+			// `clipRect = rect` inside it just called itself again -> infinite recursion ->
+			// stack overflow crash the first time a sustain note got clipped.
+			// Flixel's own docs say the rect must be *reassigned* (not just mutated) for the
+			// frame to refresh, and reassignment alone doesn't auto-trigger a redraw - we force
+			// the frame refresh ourselves, right here, only when something actually changed
+			// (that `changed` guard is what saves us from recalculating the frame every tick
+			// for every single note on screen).
+			if (changed)
+			{
+				clipRect = swagRect;
+				if (frames != null)
+					frame = frames.frames[animation.frameIndex];
+			}
 		}
-	}
-
-	@:noCompletion
-	override function set_clipRect(rect:FlxRect):FlxRect
-	{
-		// clipToStrumNote() already mutates this same rect object in place and only
-		// calls this setter when the resulting values actually changed (see its own
-		// `changed` guard), so there's no meaningful before/after state left to compare
-		// here - rect and clipRect are the same reference by the time we get this far.
-		clipRect = rect;
-
-		if (frames != null)
-			frame = frames.frames[animation.frameIndex];
-
-		return rect;
 	}
 }
