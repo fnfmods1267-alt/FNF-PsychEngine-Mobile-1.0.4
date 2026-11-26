@@ -3319,11 +3319,21 @@ class PlayState extends MusicBeatState
 	//
 	// Bugfix: this used to be a hardcoded constant (LOW_QUALITY_MAX_NOTE_SPLASHES = 4) gated
 	// behind lowQuality/performanceMode, completely ignoring the "Max Note Splashes" slider in
-	// Graphics Settings - moving the slider did nothing. Now it reads ClientPrefs.data directly
-	// and respects "0 = no limit" from the option's own tooltip, independent of those two modes.
+	// Graphics Settings - moving the slider did nothing. Now it reads ClientPrefs.data directly.
+	//
+	// IMPORTANT: this stays gated behind lowQuality/performanceMode (or the player explicitly
+	// setting the slider below its own default of 4) on purpose. maxNoteSplashes defaults to 4,
+	// which is NOT 0 - so a naive "just check maxSplashes > 0" turns this cap on unconditionally
+	// for every single player, including ones who never touched the option and never had this
+	// kill-oldest-splash path run before. That's a real, confirmed regression (crashes appeared
+	// after this exact change, disappeared when reverted to the original files), so until it's
+	// root-caused with an actual crash log, keep the blast radius matching the original behavior:
+	// only engage the cap when the player opted into it somehow.
 	public function spawnNoteSplash(x:Float = 0, y:Float = 0, ?data:Int = 0, ?note:Note, ?strum:StrumNote) {
 		var maxSplashes:Int = ClientPrefs.data.maxNoteSplashes;
-		if(maxSplashes > 0)
+		var defaultMaxSplashes:Int = 4; // ClientPrefs.data.maxNoteSplashes' own default value
+		var optedIn:Bool = ClientPrefs.data.lowQuality || ClientPrefs.data.performanceMode || (maxSplashes > 0 && maxSplashes != defaultMaxSplashes);
+		if(maxSplashes > 0 && optedIn)
 		{
 			var aliveSplashes:Int = 0;
 			for (spr in grpNoteSplashes.members)
