@@ -10,6 +10,17 @@
 	<!-- NOTE TO SELF: DISABLE THIS IF ISSUES ARE FOUND -->
 	<haxedef name="LINC_LUA_RELATIVE_DYNAMIC_LIB"/> <!-- stable luas PUT AFTER FIRST LINE WITH APP NAME AND ETC -->
 
+	<!-- hxcpp GC tuning for low-end Android: default settings favor low memory use over
+		 collection frequency, which is the classic cause of small constant "microfreeze"
+		 stutters on cpp targets. See https://haxe.org/manual/target-cpp-defines.html
+		 - HXCPP_GC_DYNAMIC_SIZE: lets working memory grow instead of collecting so often (biggest win here)
+		 - HXCPP_GC_MOVING: compacts memory to reduce fragmentation-driven collections
+		 - HXCPP_GC_GENERATIONAL: official docs mark this one "experimental" - test with it on AND off,
+		   it has caused crashes on some devices/hxcpp versions in other Haxe projects -->
+	<haxedef name="HXCPP_GC_DYNAMIC_SIZE" if="cpp" />
+	<haxedef name="HXCPP_GC_MOVING" if="cpp" />
+	<haxedef name="HXCPP_GC_GENERATIONAL" if="cpp" />
+
 	<!--The flixel preloader is not accurate in Chrome. You can use it regularly if you embed the swf into a html file
 		or you can set the actual size of your file manually at "FlxPreloaderBase-onUpdate-bytesTotal"-->
 	<!-- <app preloader="Preloader" resizable="true" /> -->
