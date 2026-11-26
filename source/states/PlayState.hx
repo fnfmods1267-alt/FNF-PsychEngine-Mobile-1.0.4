@@ -2646,6 +2646,8 @@ class PlayState extends MusicBeatState
 	private var comboSpritePool:Array<FlxSprite> = [];
 	private var numberSpritePool:Array<FlxSprite> = [];
 
+	private static inline var MAX_POOL_SIZE:Int = 12; // generoso para combos de 3 dígitos + rating + combo text
+
 	private function getPooledSprite(pool:Array<FlxSprite>):FlxSprite
 	{
 		var spr:FlxSprite = null;
@@ -2661,8 +2663,29 @@ class PlayState extends MusicBeatState
 		}
 		if (spr == null)
 		{
-			spr = new FlxSprite();
-			pool.push(spr);
+			if (pool.length >= MAX_POOL_SIZE)
+			{
+				// Pool saturado: en vez de crecer sin límite (lo que causaba el freeze
+				// progresivo y el crash), fuerza el reciclaje del sprite más viejo,
+				// cancelando su tween pendiente primero para no dejar un callback
+				// corriendo sobre un sprite que está a punto de ser reescrito.
+				spr = pool[0];
+				FlxTween.cancelTweensOf(spr);
+				spr.kill();
+			}
+			else
+			{
+				spr = new FlxSprite();
+				pool.push(spr);
+			}
+		}
+		else
+		{
+			// Importante: cancela cualquier tween pendiente ANTES de revivir el sprite,
+			// nunca después. Si el tween de fade-out de un uso anterior todavía no
+			// corrió su onComplete (el que hace kill()), cancelarlo aquí evita que ese
+			// callback mate el sprite DESPUÉS de que ya fue reutilizado en esta llamada.
+			FlxTween.cancelTweensOf(spr);
 		}
 		spr.revive();
 		spr.active = false; // these are purely visual, no physics step needed from FlxState
