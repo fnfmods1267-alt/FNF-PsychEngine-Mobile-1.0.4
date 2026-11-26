@@ -35,7 +35,13 @@ class StrumNote extends FlxSprite
 		var arr:Array<FlxColor> = ClientPrefs.data.arrowRGB[leData];
 		if(PlayState.isPixelStage) arr = ClientPrefs.data.arrowRGBPixel[leData];
 		
-		if(leData <= arr.length)
+		// Bugfix: same family as the Note.hx colors bug, but worse here - there was no null
+		// check at all. If leData (the column index) is ever out of range of arrowRGB/
+		// arrowRGBPixel (5K+/6K+ charts, custom keybind counts, modded keycounts), arr is
+		// null and arr.length on it throws a null reference crash - mid-gameplay, on the
+		// strum/receptor arrows that spawn once per column at song start. Validate the
+		// 3-element color array itself instead of comparing it to the column index.
+		if(arr != null && arr.length > 2)
 		{
 			@:bypassAccessor
 			{
