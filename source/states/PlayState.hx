@@ -289,6 +289,18 @@ class PlayState extends MusicBeatState
 		}
 		nextReloadAll = false;
 
+		// Low-end optimization (ported from Mikolka's Psych-Vslice PlayState): force a full,
+		// blocking GC collection right here, still on the loading transition between the
+		// previous state and gameplay. This is the one moment where a collection pause is
+		// basically free - the player is already looking at a loading/countdown transition,
+		// not mid-combo. It sweeps up whatever garbage the menu/previous PlayState left behind
+		// (on top of what clearStoredMemory()/clearUnusedMemory() already freed above) so the
+		// GC has less to deal with later, which is exactly what reduces its odds of kicking in
+		// for an unscheduled collection in the middle of a dense chart.
+		#if cpp
+		cpp.vm.Gc.run(true);
+		#end
+
 		startCallback = startCountdown;
 		endCallback = endSong;
 
@@ -2702,10 +2714,17 @@ class PlayState extends MusicBeatState
 		if (stageUI != "normal")
 			uiFolder = uiPrefix + "UI/";
 
-		for (rating in ratingsData)
-			Paths.image(uiFolder + rating.image + uiPostfix);
-		for (i in 0...10)
-			Paths.image(uiFolder + 'num' + i + uiPostfix);
+		// Only precache rating/number textures when they'll actually be drawn: popUpScore()
+		// already skips rendering them entirely when popUpRating is off, so loading them here
+		// unconditionally just wastes load time and memory on low-end devices for a player who
+		// explicitly turned the feature off.
+		if (ClientPrefs.data.popUpRating)
+		{
+			for (rating in ratingsData)
+				Paths.image(uiFolder + rating.image + uiPostfix);
+			for (i in 0...10)
+				Paths.image(uiFolder + 'num' + i + uiPostfix);
+		}
 	}
 
 	private function popUpScore(note:Note = null):Void
