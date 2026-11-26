@@ -267,6 +267,7 @@ class PauseSubState extends MusicBeatSubstate
 			{
 				case "Resume":
 					Paths.clearUnusedMemory();
+					if(ClientPrefs.data.aggressiveMemoryCleanup) Paths.clearStoredMemory();
 					close();
 				case 'Change Difficulty':
 					menuItems = difficultyChoices;
