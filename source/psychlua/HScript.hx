@@ -77,6 +77,25 @@ class HScript extends Iris
 				Iris.error(Printer.errorToString(e, false), pos);
 				hs.returnValue = null;
 			}
+			// Same reasoning as initHScript() in PlayState: only catching IrisError here let
+			// a ValueException (or any other runtime exception) from runHaxeCode's payload
+			// escape uncaught. call() below already guards against this; do the same here.
+			catch(e:ValueException)
+			{
+				var pos:HScriptInfos = cast hs.interp.posInfos();
+				pos.isLua = true;
+				if(parent.lastCalledFunction != '') pos.funcName = parent.lastCalledFunction;
+				Iris.error('$e', pos);
+				hs.returnValue = null;
+			}
+			catch(e:Dynamic)
+			{
+				var pos:HScriptInfos = cast hs.interp.posInfos();
+				pos.isLua = true;
+				if(parent.lastCalledFunction != '') pos.funcName = parent.lastCalledFunction;
+				Iris.error('Unexpected error running code: $e', pos);
+				hs.returnValue = null;
+			}
 		}
 	}
 	#end

@@ -39,8 +39,19 @@ class ShaderFunctions
 
 			if(leObj != null) {
 				var arr:Array<String> = funk.runtimeShaders.get(shader);
-				leObj.shader = new shaders.ErrorHandledShader.ErrorHandledRuntimeShader(shader, arr[0], arr[1]);
-				return true;
+				// ErrorHandledRuntimeShader already catches GLSL compile errors (so a bad
+				// shader doesn't crash the game), but nothing previously read onError, so
+				// setSpriteShader always returned true even when the shader silently failed
+				// to compile - the modder had no idea why their sprite looked unshaded.
+				// Hook onError here so they get a luaTrace instead of a false "it worked".
+				var newShader:shaders.ErrorHandledShader.ErrorHandledRuntimeShader = new shaders.ErrorHandledShader.ErrorHandledRuntimeShader(shader, arr[0], arr[1]);
+				var compileFailed:Bool = false;
+				newShader.onError = function(error:Dynamic) {
+					compileFailed = true;
+					FunkinLua.luaTrace('setSpriteShader: Shader $shader failed to compile! $error', false, false, FlxColor.RED);
+				};
+				leObj.shader = newShader;
+				return !compileFailed;
 			}
 			#else
 			FunkinLua.luaTrace("setSpriteShader: Platform unsupported for Runtime Shaders!", false, false, FlxColor.RED);
@@ -278,6 +289,12 @@ class ShaderFunctions
 			FunkinLua.luaTrace('Error on getting shader: Object $obj not found', false, false, FlxColor.RED);
 			return null;
 		}
+		// was a direct cast with no type check: if the object never had a runtime shader set
+		// (e.g. still Flixel's default shader, or setSpriteShader failed to compile), this
+		// returned a bogus/unsafe reference instead of null, so every getShaderX call above
+		// would then try to read properties off it. Checking the real type first keeps the
+		// "Shader is not FlxRuntimeShader!" messages those callers already show accurate.
+		if(!Std.isOfType(target.shader, FlxRuntimeShader)) return null;
 		return cast (target.shader, FlxRuntimeShader);
 	}
 	#end
