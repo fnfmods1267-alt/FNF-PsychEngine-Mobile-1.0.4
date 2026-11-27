@@ -14,10 +14,11 @@
 		 collection frequency, which is the classic cause of small constant "microfreeze"
 		 stutters on cpp targets. See https://haxe.org/manual/target-cpp-defines.html
 		 - HXCPP_GC_DYNAMIC_SIZE: lets working memory grow instead of collecting so often (biggest win here)
-		 - HXCPP_GC_MOVING: compacts memory to reduce fragmentation-driven collections
+		 REMOVED: HXCPP_GC_MOVING - caused a constant hxSehException crash on low-end Android.
+		 Likely the known hxcpp bug (HaxeFoundation/hxcpp#636): a stale pointer gets used after
+		 the GC moves/compacts an object out from under it. Same risk pattern as MULTITHREADED_LOADING below.
 		 REMOVED: HXCPP_GC_GENERATIONAL - docs mark it "experimental"; it caused a crash spike here. -->
 	<haxedef name="HXCPP_GC_DYNAMIC_SIZE" if="cpp" />
-	<haxedef name="HXCPP_GC_MOVING" if="cpp" />
 
 	<!--The flixel preloader is not accurate in Chrome. You can use it regularly if you embed the swf into a html file
 		or you can set the actual size of your file manually at "FlxPreloaderBase-onUpdate-bytesTotal"-->
