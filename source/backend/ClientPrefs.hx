@@ -36,7 +36,13 @@ import states.TitleState;
 	public var performanceMode:Bool = false; // Same visual/splash-cap effect as Low Quality, but never touches shaders and is excluded from the 'toastie' achievement check
 	public var smoothHealthBar:Bool = false; // If true, the health bar's fill eases toward its value instead of jumping instantly
 	public var shaders:Bool = true;
-	public var cacheOnGPU:Bool = #if !switch false #else true #end; // GPU Caching made by Raltyro
+	// GPU Caching made by Raltyro. Defaults to true on Switch and Android: both have integrated/
+	// unified memory (GPU and system RAM share the same physical pool), so the "shitty graphics
+	// card" risk that keeps this off by default on PC/desktop (discrete GPU with its own, separate,
+	// often-smaller VRAM) doesn't really apply there - while the RAM savings from freeing each
+	// bitmap's CPU-side copy once it's uploaded (see Paths.cacheBitmap's disposeImage() call) are
+	// exactly the kind of win low-RAM Android devices need.
+	public var cacheOnGPU:Bool = #if (switch || android) true #else false #end;
 	public var maxNoteSplashes:Int = 4; // 0 = no limit
 	public var aggressiveMemoryCleanup:Bool = false;
 	public var maxActiveShaders:Int = 0; // 0 = no limit
