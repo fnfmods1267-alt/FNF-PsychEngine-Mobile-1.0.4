@@ -1154,13 +1154,13 @@ class PlayState extends MusicBeatState
 				daNote.visible = false;
 				daNote.ignoreNote = true;
 
-				//if(!ClientPrefs.data.lowQuality || !cpuControlled) daNote.kill();
 				unspawnNotes.remove(daNote);
 				// This is a rare (non per-frame) reshuffle of unspawnNotes -- e.g. chart reload/seek --
 				// so the spawn cursor must be reset, otherwise it could point past the new length
 				// or skip/duplicate notes relative to the shifted array.
 				if (i < unspawnNotesCursor) unspawnNotesCursor--;
-				daNote.destroy();
+				// was daNote.destroy(): same GC-garbage pattern as invalidateNote() above.
+				daNote.kill();
 			}
 			--i;
 		}
@@ -3482,9 +3482,13 @@ class PlayState extends MusicBeatState
 	}
 
 	public function invalidateNote(note:Note):Void {
-		//if(!ClientPrefs.data.lowQuality || !cpuControlled) note.kill();
+		// was note.destroy(): destroy() frees real resources (bitmaps/listeners) on every
+		// single note hit/miss, which is constant garbage during gameplay and the likely
+		// cause of the periodic ~30s GC-stall freezes on low-end Android. kill() just marks
+		// it dead/invisible, matching the same was-destroy()-now-kill() pattern already used
+		// elsewhere in this file (see numScore/comboSpr/rating above).
 		notes.remove(note, true);
-		note.destroy();
+		note.kill();
 	}
 
 	public function spawnNoteSplashOnNote(note:Note) {
@@ -3752,10 +3756,38 @@ class PlayState extends MusicBeatState
 		{
 			var pos:HScriptInfos = cast {fileName: file, showLine: false};
 			Iris.error(Printer.errorToString(e, false), pos);
-			var newScript:HScript = cast (Iris.instances.get(file), HScript);
-			if(newScript != null)
-				newScript.destroy();
+			cleanupFailedHScript(file, newScript);
 		}
+		// Standalone .hx scripts (no parent Lua) are more likely to be written/edited by
+		// less experienced modders than Lua scripts, since this is the engine's main
+		// Haxe-first scripting path. A bad script here used to be able to throw a
+		// ValueException or any other runtime exception straight past this try/catch
+		// (only IrisError was caught) and crash the whole PlayState. HScript.call()
+		// already catches ValueException for the same reason; mirror that here too.
+		catch(e:ValueException)
+		{
+			var pos:HScriptInfos = cast {fileName: file, showLine: false};
+			Iris.error('$e', pos);
+			cleanupFailedHScript(file, newScript);
+		}
+		catch(e:Dynamic)
+		{
+			var pos:HScriptInfos = cast {fileName: file, showLine: false};
+			Iris.error('Unexpected error loading script: $e', pos);
+			cleanupFailedHScript(file, newScript);
+		}
+	}
+
+	// Shared cleanup for a script that failed to load: prefer destroying the instance we
+	// actually have a reference to (covers failures after the constructor registered it but
+	// before it was pushed to hscriptArray); fall back to looking it up by file path only
+	// if we never got a reference at all (e.g. the constructor itself threw).
+	function cleanupFailedHScript(file:String, newScript:HScript)
+	{
+		if (newScript == null)
+			newScript = cast (Iris.instances.get(file), HScript);
+		if (newScript != null)
+			newScript.destroy();
 	}
 	#end
 
