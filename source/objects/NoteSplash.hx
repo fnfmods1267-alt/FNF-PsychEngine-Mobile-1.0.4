@@ -59,6 +59,24 @@ class NoteSplash extends FlxSprite
 		loadSplash(splash);
 	}
 
+	// Low-end / recycle safety: the two normal ways a NoteSplash dies (its own
+	// animation.finishCallback below, and the buggedKillTime fallback in update()) both call
+	// kill() AND reset spawned = false in the same place, so by the time anything else looks at
+	// this sprite again it's in a known, clean state. Something that calls plain kill() from
+	// outside the class (e.g. PlayState's maxNoteSplashes cap, killing the oldest alive splash
+	// to make room for a new recycle()'d one) skips that reset: spawned stays true, and the
+	// previous spawnSplashNote() call's finishCallback closure is left dangling until the next
+	// spawnSplashNote() reassigns it a few lines into its own body. Whether that gap is what
+	// caused the crashes behind the maxNoteSplashes cap being reverted isn't confirmed - that'd
+	// need a crash log to prove - but it's the one real difference in state between "died
+	// normally" and "died via the cap", so this closes it without changing kill()'s behavior for
+	// anyone else.
+	public function killForRecycle():Void
+	{
+		kill();
+		spawned = false;
+	}
+
 	public var maxAnims(default, set):Int = 0;
 	public function loadSplash(?splash:String)
 	{
