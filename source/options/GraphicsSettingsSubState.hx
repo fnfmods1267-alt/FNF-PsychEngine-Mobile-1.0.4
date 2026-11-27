@@ -52,7 +52,16 @@ class GraphicsSettingsSubState extends BaseOptionsMenu
 		addOption(option);
 
 		var option:Option = new Option('GPU Caching', //Name
+			#if android
+			// Phrasing here matters: Android GPUs are (almost always) integrated, sharing one
+			// physical memory pool with the rest of the system, so the "shitty Graphics Card"
+			// warning below (written for discrete desktop GPUs with their own separate VRAM)
+			// doesn't describe the actual tradeoff on this platform - it's on by default here
+			// precisely because it reduces the RAM pressure that leads to low-end crashes.
+			"If checked, allows the GPU to be used for caching textures, decreasing RAM usage.\nRecommended on for most Android devices - keep it checked unless you notice visual issues.", //Description
+			#else
 			"If checked, allows the GPU to be used for caching textures, decreasing RAM usage.\nDon't turn this on if you have a shitty Graphics Card.", //Description
+			#end
 			'cacheOnGPU',
 			BOOL);
 		addOption(option);
