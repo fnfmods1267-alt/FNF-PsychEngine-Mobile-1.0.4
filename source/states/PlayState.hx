@@ -158,6 +158,11 @@ class PlayState extends MusicBeatState
 
 	public var notes:FlxTypedGroup<Note>;
 	public var unspawnNotes:Array<Note> = [];
+	// Cursor into the (time-sorted) unspawnNotes array for the per-frame spawn loop.
+	// Avoids Array.shift()/insert(0) on every note -- both are O(n) in Haxe (full array memmove),
+	// which gets very expensive on dense charts on low-end Android.
+	// unspawnNotes stays fully populated and sorted; this index just tracks "next note to spawn".
+	private var unspawnNotesCursor:Int = 0;
 	public var eventNotes:Array<EventNote> = [];
 
 	public var camFollow:FlxObject;
@@ -694,7 +699,7 @@ class PlayState extends MusicBeatState
 			if(ratio != 1)
 			{
 				for (note in notes.members) note.resizeByRatio(ratio);
-				for (note in unspawnNotes) note.resizeByRatio(ratio);
+				for (i in unspawnNotesCursor...unspawnNotes.length) unspawnNotes[i].resizeByRatio(ratio); // skip already-spawned dead prefix
 			}
 		}
 		songSpeed = value;
@@ -715,7 +720,7 @@ class PlayState extends MusicBeatState
 			if(ratio != 1)
 			{
 				for (note in notes.members) note.resizeByRatio(ratio);
-				for (note in unspawnNotes) note.resizeByRatio(ratio);
+				for (i in unspawnNotesCursor...unspawnNotes.length) unspawnNotes[i].resizeByRatio(ratio); // skip already-spawned dead prefix
 			}
 		}
 		playbackRate = value;
@@ -1151,6 +1156,10 @@ class PlayState extends MusicBeatState
 
 				//if(!ClientPrefs.data.lowQuality || !cpuControlled) daNote.kill();
 				unspawnNotes.remove(daNote);
+				// This is a rare (non per-frame) reshuffle of unspawnNotes -- e.g. chart reload/seek --
+				// so the spawn cursor must be reset, otherwise it could point past the new length
+				// or skip/duplicate notes relative to the shifted array.
+				if (i < unspawnNotesCursor) unspawnNotesCursor--;
 				daNote.destroy();
 			}
 			--i;
@@ -1531,6 +1540,7 @@ class PlayState extends MusicBeatState
 				makeEvent(event, i);
 
 		unspawnNotes.sort(sortByTime);
+		unspawnNotesCursor = 0; // generateSong always (re)builds unspawnNotes from scratch
 		generatedMusic = true;
 	}
 
@@ -1858,15 +1868,16 @@ class PlayState extends MusicBeatState
 		}
 		doDeathCheck();
 
-		if (unspawnNotes[0] != null)
+		var unspawnLen:Int = unspawnNotes.length;
+		if (unspawnNotesCursor < unspawnLen)
 		{
 			var time:Float = spawnTime * playbackRate;
 			if(songSpeed < 1) time /= songSpeed;
-			if(unspawnNotes[0].multSpeed < 1) time /= unspawnNotes[0].multSpeed;
+			if(unspawnNotes[unspawnNotesCursor].multSpeed < 1) time /= unspawnNotes[unspawnNotesCursor].multSpeed;
 
-			while (unspawnNotes.length > 0 && unspawnNotes[0].strumTime - Conductor.songPosition < time)
+			while (unspawnNotesCursor < unspawnLen && unspawnNotes[unspawnNotesCursor].strumTime - Conductor.songPosition < time)
 			{
-				var dunceNote:Note = unspawnNotes[0];
+				var dunceNote:Note = unspawnNotes[unspawnNotesCursor];
 				notes.insert(0, dunceNote);
 				dunceNote.spawned = true;
 
@@ -1875,7 +1886,17 @@ class PlayState extends MusicBeatState
 				callOnLuas('onSpawnNote', [0, dunceNote.noteData, dunceNote.noteType, dunceNote.isSustainNote, dunceNote.strumTime]);
 				callOnHScript('onSpawnNote', [dunceNote]);
 
-				unspawnNotes.shift();
+				unspawnNotesCursor++;
+			}
+
+			// Once every note has been spawned, drop the now-dead prefix from the backing
+			// array in a single O(k) splice instead of O(k) individual shifts, and reset the
+			// cursor. Keeps unspawnNotes small for any code elsewhere that iterates it, while
+			// still doing the trim only once per song instead of once per note.
+			if (unspawnNotesCursor >= unspawnLen && unspawnNotesCursor > 0)
+			{
+				unspawnNotes.splice(0, unspawnNotesCursor);
+				unspawnNotesCursor = 0;
 			}
 		}
 
@@ -2522,10 +2543,15 @@ class PlayState extends MusicBeatState
 				if(daNote.strumTime < songLength - Conductor.safeZoneOffset)
 					health -= 0.05 * healthLoss;
 			});
-			for (daNote in unspawnNotes)
+			// Only unspawned notes (from the cursor onward) are still "pending"; everything
+			// before the cursor has already been spawned and handled via the normal hit/miss path.
+			var i:Int = unspawnNotesCursor;
+			while (i < unspawnNotes.length)
 			{
+				var daNote:Note = unspawnNotes[i];
 				if(daNote != null && daNote.strumTime < songLength - Conductor.safeZoneOffset)
 					health -= 0.05 * healthLoss;
+				i++;
 			}
 
 			if(doDeathCheck()) {
@@ -2636,6 +2662,7 @@ class PlayState extends MusicBeatState
 			invalidateNote(daNote);
 		}
 		unspawnNotes = [];
+		unspawnNotesCursor = 0;
 		eventNotes = [];
 	}
 
@@ -2951,28 +2978,44 @@ class PlayState extends MusicBeatState
 		var lastTime:Float = Conductor.songPosition;
 		if(Conductor.songPosition >= 0) Conductor.songPosition = FlxG.sound.music.time + Conductor.offset;
 
-		// obtain notes that the player can hit
-		var plrInputNotes:Array<Note> = notes.members.filter(function(n:Note):Bool {
-			var canHit:Bool = n != null && !strumsBlocked[n.noteData] && n.canBeHit && n.mustPress && !n.tooLate && !n.wasGoodHit && !n.blockHit;
-			return canHit && !n.isSustainNote && n.noteData == key;
-		});
-		plrInputNotes.sort(sortHitNotes);
+		// obtain notes that the player can hit.
+		// NOTE (perf): this used to build a filtered Array<Note> with .filter() and then
+		// .sort(sortHitNotes) on every single key press - two allocations (filter's result
+		// array + sort's internal work) and an O(n log n) sort, every time a key is tapped.
+		// On a dense chart with fast input that's constant GC pressure for a result that only
+		// ever needs the best and second-best note (sortHitNotes' own ordering: non-lowPriority
+		// before lowPriority, then earliest strumTime). So instead we do a single O(n) scan
+		// that tracks just those two notes directly - no array, no sort, same tie-break rules,
+		// same resulting funnyNote/doubleNote semantics as before.
+		var funnyNote:Note = null;
+		var doubleNote:Note = null;
+		var notesMembers = notes.members;
+		var notesLen:Int = notes.length;
+		for (idx in 0...notesLen) {
+			var n:Note = notesMembers[idx];
+			if (n == null || n.isSustainNote || n.noteData != key) continue;
+			var canHit:Bool = !strumsBlocked[n.noteData] && n.canBeHit && n.mustPress && !n.tooLate && !n.wasGoodHit && !n.blockHit;
+			if (!canHit) continue;
 
-		if (plrInputNotes.length != 0) { // slightly faster than doing `> 0` lol
-			var funnyNote:Note = plrInputNotes[0]; // front note
+			if (funnyNote == null || sortHitNotes(n, funnyNote) < 0) {
+				doubleNote = funnyNote;
+				funnyNote = n;
+			} else if (doubleNote == null || sortHitNotes(n, doubleNote) < 0) {
+				doubleNote = n;
+			}
+		}
 
-			if (plrInputNotes.length > 1) {
-				var doubleNote:Note = plrInputNotes[1];
-
-				if (doubleNote.noteData == funnyNote.noteData) {
-					// if the note has a 0ms distance (is on top of the current note), kill it
-					if (Math.abs(doubleNote.strumTime - funnyNote.strumTime) < 1.0)
-						invalidateNote(doubleNote);
-					else if (doubleNote.strumTime < funnyNote.strumTime)
-					{
-						// replace the note if its ahead of time (or at least ensure "doubleNote" is ahead)
-						funnyNote = doubleNote;
-					}
+		if (funnyNote != null) {
+			if (doubleNote != null) {
+				// doubleNote.noteData == funnyNote.noteData is always true here since both were
+				// filtered on n.noteData == key above, so that check is implied and skipped.
+				// if the note has a 0ms distance (is on top of the current note), kill it
+				if (Math.abs(doubleNote.strumTime - funnyNote.strumTime) < 1.0)
+					invalidateNote(doubleNote);
+				else if (doubleNote.strumTime < funnyNote.strumTime)
+				{
+					// replace the note if its ahead of time (or at least ensure "doubleNote" is ahead)
+					funnyNote = doubleNote;
 				}
 			}
 			goodNoteHit(funnyNote);
