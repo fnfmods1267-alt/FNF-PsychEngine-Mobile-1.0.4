@@ -19,6 +19,7 @@ import lime.utils.Assets;
 import openfl.utils.Assets as OpenFlAssets;
 import openfl.events.KeyboardEvent;
 import haxe.Json;
+import haxe.ValueException;
 
 import cutscenes.DialogueBoxPsych;
 
