@@ -298,8 +298,12 @@ class Character extends FlxSprite
 		}
 
 		// Read once here: playAnim() above (pico-speaker branch) may have changed the current animation,
-		// so this must be read fresh, but only once instead of the previous duplicate call.
-		if (getAnimationName().startsWith('sing')) holdTimer += elapsed;
+		// so this must be read fresh after the switch - but nothing between here and the '$name-loop'
+		// check below calls playAnim() again (dance()/the holdTimer reset don't change the current
+		// anim), so this single read covers both this check and the -loop check further down,
+		// instead of calling getAnimationName() (and isAnimationNull() inside it) twice in a row.
+		var name:String = getAnimationName();
+		if (name.startsWith('sing')) holdTimer += elapsed;
 		else if(isPlayer) holdTimer = 0;
 
 		if (!isPlayer && holdTimer >= Conductor.stepCrochet * (0.0011 #if FLX_PITCH / (FlxG.sound.music != null ? FlxG.sound.music.pitch : 1) #end) * singDuration)
@@ -308,7 +312,6 @@ class Character extends FlxSprite
 			holdTimer = 0;
 		}
 
-		var name:String = getAnimationName();
 		if(isAnimationFinished() && hasAnimation('$name-loop'))
 			playAnim('$name-loop');
 
