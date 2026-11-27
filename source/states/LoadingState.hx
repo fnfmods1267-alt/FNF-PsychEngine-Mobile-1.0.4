@@ -84,6 +84,18 @@ class LoadingState extends MusicBeatState
 	override function create()
 	{
 		persistentUpdate = true;
+
+		// Low-end optimization (same reasoning as PlayState.create()'s Gc.run(true)): this is
+		// a loading screen, the one place in the whole game where a blocking GC pause is free -
+		// the player already expects a wait here. Sweeping now, before the thread pool starts
+		// decoding PNGs/sounds in the background, clears out whatever the previous state left
+		// behind so the collector has less to do later and is less likely to kick in mid-decode,
+		// which is exactly the kind of hitch this state's MAX_UPLOADS_PER_FRAME budget (below)
+		// is also trying to avoid.
+		#if cpp
+		cpp.vm.Gc.run(true);
+		#end
+
 		barGroup = new FlxSpriteGroup();
 		add(barGroup);
 
@@ -823,6 +835,18 @@ class LoadingState extends MusicBeatState
 		return Paths.currentTrackedSounds.get(file);
 	}
 
+	// Low-end optimization: with imagesToPrepare launched all at once (see _threadFunc()) and
+	// checkLoaded() only uploading MAX_UPLOADS_PER_FRAME (2) decoded bitmaps to the GPU per
+	// frame, a mod/stage with many unique images could previously have all of them sitting
+	// decoded in requestedBitmaps simultaneously, waiting their turn - every one of those is a
+	// full raw BitmapData held in RAM on top of whatever's already loaded from the last state,
+	// which is exactly the kind of spike that crashes low-RAM devices during song load. This
+	// cap makes the (already single-threaded, see getCPUThreadsCount()) decode thread pause and
+	// let checkLoaded() drain the backlog before decoding more, trading a bit of load-thread
+	// idle time for a flat, predictable memory ceiling instead of a backlog that scales with
+	// however many images this particular song/stage/mod happens to need.
+	static inline var MAX_PENDING_BITMAPS:Int = 6;
+
 	// thread safe sound loader
 	static function preloadGraphic(key:String):Null<BitmapData>
 	{
@@ -836,6 +860,22 @@ class LoadingState extends MusicBeatState
 				var file:String = Paths.getPath(requestKey, IMAGE);
 				if (#if sys FileSystem.exists(file) || #end OpenFlAssets.exists(file, IMAGE))
 				{
+					// Only the intrusive (visible loading bar) path drains gradually via
+					// checkLoaded()'s per-frame budget - the non-intrusive path dumps the whole
+					// map at once (see checkLoaded()'s "!isIntrusive" branch) and backpressure
+					// here would just add idle waiting with no memory benefit for that path.
+					if (isIntrusive)
+					{
+						while (true)
+						{
+							mutex.acquire();
+							var pending:Int = requestedBitmaps.keys().hasNext() ? Lambda.count(requestedBitmaps) : 0;
+							mutex.release();
+							if (pending < MAX_PENDING_BITMAPS) break;
+							Sys.sleep(0.004);
+						}
+					}
+
 					#if sys
 					var bitmap:BitmapData = BitmapData.fromFile(file);
 					#else

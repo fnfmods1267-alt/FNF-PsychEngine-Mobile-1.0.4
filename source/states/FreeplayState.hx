@@ -617,6 +617,16 @@ class FreeplayState extends MusicBeatState
 		FlxG.autoPause = ClientPrefs.data.autoPause;
 		if (!FlxG.sound.music.playing && !stopMusicPlay)
 			FlxG.sound.playMusic(Paths.music('freakyMenu'));
+
+		// Low-end fix: create() used to call these, but running them on entry caused a visible
+		// hitch opening Freeplay, so they got commented out (see create()) instead of moved.
+		// Without them anywhere, every HealthIcon + audio preview loaded while browsing songs
+		// here stays cached forever (Paths.currentTrackedAssets / FlxG.bitmap._cache), which is
+		// the main RAM leak behind crashes "while in Freeplay" and later in PlayState after
+		// leaving it. Leaving here is a transition the player already expects a short stall on,
+		// so it's a safe place to pay that cost instead of never paying it.
+		Paths.clearStoredMemory();
+		Paths.clearUnusedMemory();
 	}	
 }
 

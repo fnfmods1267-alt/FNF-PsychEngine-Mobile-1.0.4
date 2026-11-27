@@ -3525,11 +3525,16 @@ class PlayState extends MusicBeatState
 
 			// Oldest-first: the group preserves insertion/recycle order, so the first
 			// alive member found is the longest-lived splash on screen.
+			//
+			// Uses killForRecycle() instead of kill() directly: NoteSplash's own death paths
+			// (its finishCallback, and its buggedKillTime fallback) always pair kill() with
+			// resetting its internal `spawned` flag, which a plain kill() from out here skipped.
+			// See killForRecycle()'s own comment in NoteSplash.hx for why that gap mattered.
 			if(aliveSplashes >= maxSplashes)
 				for (spr in grpNoteSplashes.members)
 					if(spr != null && spr.alive)
 					{
-						spr.kill();
+						spr.killForRecycle();
 						break;
 					}
 		}
